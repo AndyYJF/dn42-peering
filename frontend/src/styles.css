@@ -679,5 +679,11 @@ table.grid tr:hover td { background: var(--hover-row); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  /* The portal's motion is limited to subtle ambient cues (LED blink,
+     packet flow, gentle fades). We keep those but drop the larger
+     entrance transforms so the layout doesn't lurch for motion-sensitive
+     users. */
+  .page, .rise, .node-card { animation: none; }
+  .rise { opacity: 1; transform: none; }
+  .node-card:hover { transform: none; }
 }
