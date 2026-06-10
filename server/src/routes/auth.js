@@ -1,10 +1,12 @@
 import { Router } from 'express';
+import { randomInt } from 'node:crypto';
 import { config } from '../config.js';
 import { q, logEvent } from '../db.js';
-import { lookupAuthMethods } from '../registry.js';
+import { lookupAuthMethods, maskEmail } from '../registry.js';
 import { verifySignature, SSH_NAMESPACE } from '../authverify.js';
 import { sign, verify, randomId, randomChallenge } from '../jwt.js';
 import { isValidAsn, rateLimit } from '../util.js';
+import { mailEnabled, sendCode } from '../mailer.js';
 
 export const authRouter = Router();
 authRouter.use(rateLimit({ windowMs: 10 * 60 * 1000, max: 40 }));
@@ -21,18 +23,19 @@ authRouter.post('/lookup', async (req, res) => {
   try {
     const { aut, methods } = await lookupAuthMethods(asn);
     if (!aut) return res.status(404).json({ error: `AS${asn} not found in the DN42 registry` });
+    const usable = methods.filter((m) => m.type !== 'email' || mailEnabled() || config.demo);
     res.json({
       asn,
       asName: aut.asName,
       mntBy: aut.mntBy,
-      methods: methods.map(({ idx, mntner, type, display }) => ({ idx, mntner, type, display })),
+      methods: usable.map(({ idx, mntner, type, display }) => ({ idx, mntner, type, display })),
     });
   } catch (e) {
     res.status(502).json({ error: `registry lookup failed: ${e.message}` });
   }
 });
 
-// Step 2 — issue a challenge bound to one registry auth key.
+// Step 2 — issue a challenge bound to one registry auth method.
 authRouter.post('/challenge', async (req, res) => {
   const asn = parseAsn(req.body.asn);
   const methodIndex = Number(req.body.methodIndex);
@@ -43,6 +46,28 @@ authRouter.post('/challenge', async (req, res) => {
     if (!method) return res.status(400).json({ error: 'unknown auth method index' });
 
     const id = randomId();
+
+    if (method.type === 'email') {
+      if (!mailEnabled() && !config.demo) return res.status(503).json({ error: 'e-mail login is not configured on this portal' });
+      // cap outstanding codes per ASN to limit mail abuse
+      if (q.recentEmailChallenges.get(asn, Date.now()).n >= 3) {
+        return res.status(429).json({ error: 'too many codes requested — wait for the previous ones to expire' });
+      }
+      const code = String(randomInt(0, 1000000)).padStart(6, '0');
+      q.insertChallenge.run(id, asn, method.mntner, 'email', method.keyData,
+        code, Date.now() + config.challengeTtlSec * 1000);
+      try {
+        await sendCode(method.keyData, code, asn);
+      } catch (e) {
+        return res.status(502).json({ error: `could not send mail: ${e.message}` });
+      }
+      logEvent(asn, 'auth.email-code', maskEmail(method.keyData));
+      return res.json({
+        challengeId: id, method: 'email', mntner: method.mntner,
+        sentTo: maskEmail(method.keyData), ttlSec: config.challengeTtlSec,
+      });
+    }
+
     const challenge = randomChallenge();
     q.insertChallenge.run(id, asn, method.mntner, method.type, method.keyData,
       challenge, Date.now() + config.challengeTtlSec * 1000);
@@ -56,7 +81,14 @@ authRouter.post('/challenge', async (req, res) => {
   }
 });
 
-// Step 3 — verify the signature, mint a session token.
+const codeEqual = (a, b) => {
+  const x = String(a).trim(), y = String(b).trim();
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
+  return diff === 0;
+};
+
+// Step 3 — verify the signature / e-mail code, mint a session token.
 authRouter.post('/verify', async (req, res) => {
   const { challengeId, signature, publicKey } = req.body;
   if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
@@ -64,10 +96,18 @@ authRouter.post('/verify', async (req, res) => {
   if (!ch || ch.used) return res.status(400).json({ error: 'challenge not found or already used' });
   if (ch.expires_at < Date.now()) return res.status(400).json({ error: 'challenge expired, request a new one' });
 
-  const result = await verifySignature(
-    ch.method === 'pgp' ? 'pgp' : 'ssh', ch.key_data, ch.challenge, String(signature),
-    publicKey ? String(publicKey) : undefined,
-  );
+  let result;
+  if (ch.method === 'email') {
+    if (ch.attempts >= 5) return res.status(429).json({ error: 'too many wrong codes — request a new one' });
+    q.bumpAttempts.run(ch.id);
+    const ok = (config.demo && String(signature).trim() === 'demo') || codeEqual(signature, ch.challenge);
+    result = ok ? { ok: true } : { ok: false, error: 'wrong code' };
+  } else {
+    result = await verifySignature(
+      ch.method === 'pgp' ? 'pgp' : 'ssh', ch.key_data, ch.challenge, String(signature),
+      publicKey ? String(publicKey) : undefined,
+    );
+  }
   if (!result.ok) return res.status(401).json({ error: `verification failed: ${result.error}` });
 
   q.useChallenge.run(ch.id);

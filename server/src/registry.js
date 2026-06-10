@@ -43,6 +43,34 @@ async function fetchObject(type, name) {
 
 const attr = (obj, key) => obj.filter(([k]) => k.toLowerCase() === key).map(([, v]) => v);
 
+const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+
+export function maskEmail(e) {
+  const [local, domain] = e.split('@');
+  const head = local.slice(0, 2);
+  const tail = local.length > 5 ? local.slice(-1) : '';
+  return `${head}***${tail}@${domain}`;
+}
+
+/**
+ * Contact e-mails for an ASN: aut-num admin-c/tech-c -> person/role objects,
+ * `e-mail:` attributes plus `contact:` lines that contain an address.
+ */
+export async function lookupContactEmails(aut) {
+  const handles = [...new Set([...attr(aut.raw, 'admin-c'), ...attr(aut.raw, 'tech-c')])];
+  const emails = [];
+  for (const h of handles) {
+    const person = (await fetchObject('person', h)) || (await fetchObject('role', h));
+    if (!person) continue;
+    for (const v of [...attr(person, 'e-mail'), ...attr(person, 'contact')]) {
+      const m = v.match(EMAIL_RE);
+      const found = m && m[0].toLowerCase();
+      if (found && !emails.includes(found)) emails.push(found);
+    }
+  }
+  return emails;
+}
+
 /**
  * Fetch a PGP public key from the registry's key-cert object (PGPKEY-<last 8
  * hex digits>). Returns the armored key block or null. Note: certif lines in
@@ -71,12 +99,13 @@ export async function lookupAsn(asn) {
     asName: attr(aut, 'as-name')[0] || `AS${asn}`,
     descr: attr(aut, 'descr')[0] || '',
     mntBy: mntners,
+    raw: aut,
   };
 }
 
 /**
- * Collect usable auth methods from the ASN's maintainer objects.
- * Returns [{ idx, mntner, type: 'ssh-ed25519'|'ssh-rsa'|'ecdsa-*'|'pgp', keyData, display }]
+ * Collect usable auth methods from the ASN's maintainer objects: SSH / PGP
+ * keys from mntner auth lines, then registry contact e-mails (admin-c/tech-c).
  */
 export async function lookupAuthMethods(asn) {
   const aut = await lookupAsn(asn);
@@ -102,6 +131,13 @@ export async function lookupAuthMethods(asn) {
         });
       }
     }
+  }
+  for (const email of await lookupContactEmails(aut)) {
+    methods.push({
+      idx: methods.length, mntner: aut.mntBy[0] || 'registry', type: 'email',
+      keyData: email,
+      display: `e-mail code to ${maskEmail(email)}`,
+    });
   }
   return { aut, methods };
 }

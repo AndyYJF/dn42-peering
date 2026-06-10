@@ -56,6 +56,7 @@ function StepAuth({ auth, onAuthed, onNext }) {
   });
 
   const doChallenge = () => run(async () => {
+    setSignature('');
     setChallenge(await api.challenge(lookup.asn, method));
   });
 
@@ -95,8 +96,8 @@ function StepAuth({ auth, onAuthed, onNext }) {
             <div className="divider-label">Prove ownership with</div>
             {lookup.methods.length === 0 && (
               <div className="alert">
-                No usable auth method (SSH key / PGP fingerprint) found on your maintainer object.
-                Add one to your MNTNER in the registry, or contact us out-of-band.
+                No usable auth method (SSH key, PGP fingerprint or contact e-mail) found in the registry.
+                Add one to your MNTNER / person object, or contact us out-of-band.
               </div>
             )}
             {lookup.methods.map((m) => (
@@ -107,20 +108,48 @@ function StepAuth({ auth, onAuthed, onNext }) {
                   checked={method === m.idx}
                   onChange={() => setMethod(m.idx)}
                 />
-                <span className="chip">{m.type === 'pgp' ? 'PGP' : 'SSH'}</span>
+                <span className="chip">{m.type === 'pgp' ? 'PGP' : m.type === 'email' ? 'MAIL' : 'SSH'}</span>
                 <span className="mono-cut" title={m.display}>{m.display}</span>
                 <span className="dim xs" style={{ marginLeft: 'auto' }}>{m.mntner}</span>
               </label>
             ))}
             {lookup.methods.length > 0 && (
               <button className="btn" onClick={doChallenge} disabled={busy || method == null} style={{ marginTop: 10 }}>
-                {busy && method != null && !challenge ? <Spinner /> : 'Generate challenge'}
+                {busy && method != null && !challenge
+                  ? <Spinner />
+                  : lookup.methods[method]?.type === 'email' ? 'Send code' : 'Generate challenge'}
               </button>
             )}
           </>
         )}
 
-        {challenge && (
+        {challenge && challenge.method === 'email' && (
+          <>
+            <div className="divider-label">Enter the code</div>
+            <div className="alert ok">
+              A 6-digit code was sent to <b>{challenge.sentTo}</b> (from your registry contact).
+              It is valid for {Math.round(challenge.ttlSec / 60)} minutes.
+            </div>
+            <Field label="Verification code" hint="6 digits">
+              <input
+                type="text"
+                value={signature}
+                onChange={(e) => setSignature(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && signature.trim() && doVerify()}
+                placeholder="000000"
+                style={{ letterSpacing: '0.5em', fontSize: 18, maxWidth: 220 }}
+                maxLength={6}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+            </Field>
+            <button className="btn solid" onClick={doVerify} disabled={busy || !signature.trim()}>
+              {busy ? <Spinner /> : 'Verify & continue →'}
+            </button>
+          </>
+        )}
+
+        {challenge && challenge.method !== 'email' && (
           <>
             <div className="divider-label">Sign this challenge</div>
             <CopyBlock label="run on your machine" text={challenge.command} />
@@ -164,6 +193,10 @@ function StepAuth({ auth, onAuthed, onNext }) {
           <p>
             <span className="amber">PGP:</span> clearsign the challenge with the key matching your
             registered fingerprint. We fetch the public key from a keyserver.
+          </p>
+          <p>
+            <span className="amber">E-mail:</span> a one-time code goes to the contact address
+            on your registry person object (admin-c / tech-c).
           </p>
           <p style={{ marginBottom: 0 }}>
             The resulting session token lives in your browser only and expires after 24 hours.

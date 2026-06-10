@@ -29,6 +29,7 @@ const defaults = {
   demo: false,
   registry: { localPath: '', api: 'https://explorer.burble.com/api/registry' },
   keyserver: 'keys.openpgp.org',
+  smtp: { host: '', port: 587, user: '', pass: '', from: '' },
   allowedAsnRanges: [[4242420000, 4242423999]],
   challengeTtlSec: 900,
   jwtTtlSec: 86400,
@@ -42,6 +43,7 @@ export const config = {
   ...defaults,
   ...fileCfg,
   registry: { ...defaults.registry, ...(fileCfg.registry || {}) },
+  smtp: { ...defaults.smtp, ...(fileCfg.smtp || {}) },
   demo: process.env.PEERING_DEMO === '1' || fileCfg.demo === true,
   port: Number(process.env.PORT || fileCfg.port || defaults.port),
 };

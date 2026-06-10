@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS challenges (
   key_data   TEXT    NOT NULL,
   challenge  TEXT    NOT NULL,
   expires_at INTEGER NOT NULL,
-  used       INTEGER NOT NULL DEFAULT 0
+  used       INTEGER NOT NULL DEFAULT 0,
+  attempts   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -54,6 +55,9 @@ CREATE TABLE IF NOT EXISTS events (
 export function logEvent(asn, action, detail = '') {
   db.prepare('INSERT INTO events (asn, action, detail) VALUES (?, ?, ?)').run(asn, action, String(detail).slice(0, 500));
 }
+
+// migration for databases created before the email-code login existed
+try { db.exec('ALTER TABLE challenges ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
 
 export const q = {
   peeringsByAsn: db.prepare('SELECT * FROM peerings WHERE asn = ? ORDER BY created_at'),
@@ -74,5 +78,7 @@ export const q = {
   insertChallenge: db.prepare('INSERT INTO challenges (id, asn, mntner, method, key_data, challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   getChallenge: db.prepare('SELECT * FROM challenges WHERE id = ?'),
   useChallenge: db.prepare('UPDATE challenges SET used = 1 WHERE id = ?'),
+  bumpAttempts: db.prepare('UPDATE challenges SET attempts = attempts + 1 WHERE id = ?'),
+  recentEmailChallenges: db.prepare("SELECT COUNT(*) AS n FROM challenges WHERE asn = ? AND method = 'email' AND expires_at > ?"),
   recentEvents: db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?'),
 };

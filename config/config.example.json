@@ -12,6 +12,13 @@
     "api": "https://explorer.burble.com/api/registry"
   },
   "keyserver": "keys.openpgp.org",
+  "smtp": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "user": "you@gmail.com",
+    "pass": "your-gmail-app-password",
+    "from": "DN42 Peering Desk <you@gmail.com>"
+  },
   "allowedAsnRanges": [
     [4242420000, 4242423999],
     [4201270000, 4201279999]
