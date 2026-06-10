@@ -1,0 +1,19 @@
+services:
+  server:
+    image: node:24-alpine
+    container_name: dn42-peering
+    working_dir: /app/server
+    # ssh-keygen + gpg are needed for signature verification
+    command: sh -c "apk add --no-cache openssh-keygen gnupg >/dev/null && node --no-warnings src/index.js"
+    ports:
+      - "8042:8042"
+    volumes:
+      - ..:/app
+      - peering-data:/app/server/data
+    environment:
+      - PEERING_CONFIG=/app/config/config.json
+      - PEERING_NODES=/app/config/nodes.json
+    restart: unless-stopped
+
+volumes:
+  peering-data:

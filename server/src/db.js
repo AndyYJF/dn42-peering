@@ -1,0 +1,78 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
+import { config } from './config.js';
+
+const dbPath = path.resolve(process.cwd(), config.dbPath);
+mkdirSync(path.dirname(dbPath), { recursive: true });
+
+export const db = new DatabaseSync(dbPath);
+
+db.exec(`
+PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS peerings (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  asn         INTEGER NOT NULL,
+  mntner      TEXT    NOT NULL,
+  node_id     TEXT    NOT NULL,
+  status      TEXT    NOT NULL DEFAULT 'pending',
+  wg_pubkey   TEXT    NOT NULL,
+  wg_endpoint TEXT,
+  peer_ll     TEXT    NOT NULL,
+  peer_v4     TEXT,
+  peer_v6     TEXT,
+  mp_bgp      INTEGER NOT NULL DEFAULT 1,
+  enh         INTEGER NOT NULL DEFAULT 1,
+  wg_port     INTEGER NOT NULL,
+  last_error  TEXT,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (asn, node_id)
+);
+
+CREATE TABLE IF NOT EXISTS challenges (
+  id         TEXT PRIMARY KEY,
+  asn        INTEGER NOT NULL,
+  mntner     TEXT    NOT NULL,
+  method     TEXT    NOT NULL,
+  key_data   TEXT    NOT NULL,
+  challenge  TEXT    NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used       INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts     TEXT NOT NULL DEFAULT (datetime('now')),
+  asn    INTEGER,
+  action TEXT NOT NULL,
+  detail TEXT
+);
+`);
+
+export function logEvent(asn, action, detail = '') {
+  db.prepare('INSERT INTO events (asn, action, detail) VALUES (?, ?, ?)').run(asn, action, String(detail).slice(0, 500));
+}
+
+export const q = {
+  peeringsByAsn: db.prepare('SELECT * FROM peerings WHERE asn = ? ORDER BY created_at'),
+  peeringById: db.prepare('SELECT * FROM peerings WHERE id = ?'),
+  peeringByAsnNode: db.prepare('SELECT * FROM peerings WHERE asn = ? AND node_id = ?'),
+  allPeerings: db.prepare('SELECT * FROM peerings ORDER BY created_at DESC'),
+  countByStatus: db.prepare('SELECT status, COUNT(*) AS n FROM peerings GROUP BY status'),
+  countByNode: db.prepare("SELECT node_id, COUNT(*) AS n FROM peerings WHERE status = 'active' GROUP BY node_id"),
+  portsOnNode: db.prepare('SELECT wg_port FROM peerings WHERE node_id = ?'),
+  insertPeering: db.prepare(`INSERT INTO peerings
+    (asn, mntner, node_id, status, wg_pubkey, wg_endpoint, peer_ll, peer_v4, peer_v6, mp_bgp, enh, wg_port)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  updatePeering: db.prepare(`UPDATE peerings SET
+    wg_pubkey = ?, wg_endpoint = ?, peer_ll = ?, peer_v4 = ?, peer_v6 = ?, mp_bgp = ?, enh = ?,
+    updated_at = datetime('now') WHERE id = ?`),
+  setStatus: db.prepare("UPDATE peerings SET status = ?, last_error = ?, updated_at = datetime('now') WHERE id = ?"),
+  deletePeering: db.prepare('DELETE FROM peerings WHERE id = ?'),
+  insertChallenge: db.prepare('INSERT INTO challenges (id, asn, mntner, method, key_data, challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+  getChallenge: db.prepare('SELECT * FROM challenges WHERE id = ?'),
+  useChallenge: db.prepare('UPDATE challenges SET used = 1 WHERE id = ?'),
+  recentEvents: db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?'),
+};

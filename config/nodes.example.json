@@ -1,0 +1,56 @@
+{
+  "nodes": [
+    {
+      "id": "hkg1",
+      "name": "Hong Kong",
+      "cc": "HK",
+      "endpoint": "hkg1.dn42.example.com",
+      "wgPubkey": "HKG1NODEPUBKEYxxxxxxxxxxxxxxxxxxxxxxxxxxxx=",
+      "linkLocal": "fe80::1234:1",
+      "tunnelV4": "172.22.100.65",
+      "dn42V6": "fd42:4242:1234::1",
+      "agentUrl": "http://10.100.0.1:8643",
+      "agentToken": "CHANGE-ME-hkg1-agent-token",
+      "features": ["ipv4", "ipv6", "mp-bgp", "extended-next-hop"]
+    },
+    {
+      "id": "fra1",
+      "name": "Frankfurt",
+      "cc": "DE",
+      "endpoint": "fra1.dn42.example.com",
+      "wgPubkey": "FRA1NODEPUBKEYxxxxxxxxxxxxxxxxxxxxxxxxxxxx=",
+      "linkLocal": "fe80::1234:2",
+      "tunnelV4": "172.22.100.66",
+      "dn42V6": "fd42:4242:1234::2",
+      "agentUrl": "http://10.100.0.2:8643",
+      "agentToken": "CHANGE-ME-fra1-agent-token",
+      "features": ["ipv4", "ipv6", "mp-bgp", "extended-next-hop"]
+    },
+    {
+      "id": "lax1",
+      "name": "Los Angeles",
+      "cc": "US",
+      "endpoint": "lax1.dn42.example.com",
+      "wgPubkey": "LAX1NODEPUBKEYxxxxxxxxxxxxxxxxxxxxxxxxxxxx=",
+      "linkLocal": "fe80::1234:3",
+      "tunnelV4": "172.22.100.67",
+      "dn42V6": "fd42:4242:1234::3",
+      "agentUrl": "http://10.100.0.3:8643",
+      "agentToken": "CHANGE-ME-lax1-agent-token",
+      "features": ["ipv4", "ipv6", "mp-bgp", "extended-next-hop"]
+    },
+    {
+      "id": "sin1",
+      "name": "Singapore",
+      "cc": "SG",
+      "endpoint": "sin1.dn42.example.com",
+      "wgPubkey": "SIN1NODEPUBKEYxxxxxxxxxxxxxxxxxxxxxxxxxxxx=",
+      "linkLocal": "fe80::1234:4",
+      "tunnelV4": "172.22.100.68",
+      "dn42V6": "fd42:4242:1234::4",
+      "agentUrl": "http://10.100.0.4:8643",
+      "agentToken": "CHANGE-ME-sin1-agent-token",
+      "features": ["ipv4", "ipv6", "mp-bgp", "extended-next-hop"]
+    }
+  ]
+}

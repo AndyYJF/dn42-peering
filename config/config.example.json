@@ -1,0 +1,22 @@
+{
+  "networkName": "EXAMPLE-NET",
+  "ourAsn": 4242421234,
+  "port": 8042,
+  "dbPath": "./data/peering.db",
+  "jwtSecret": "CHANGE-ME-to-a-long-random-string",
+  "adminToken": "CHANGE-ME-admin-token",
+  "autoApprove": true,
+  "demo": false,
+  "registry": {
+    "localPath": "",
+    "api": "https://explorer.burble.com/api/registry"
+  },
+  "keyserver": "keys.openpgp.org",
+  "allowedAsnRanges": [
+    [4242420000, 4242423999],
+    [4201270000, 4201279999]
+  ],
+  "challengeTtlSec": 900,
+  "jwtTtlSec": 86400,
+  "maxPeeringsPerAsn": 4
+}

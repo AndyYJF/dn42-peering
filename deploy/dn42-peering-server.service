@@ -1,0 +1,22 @@
+[Unit]
+Description=dn42-peering control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dn42peering
+WorkingDirectory=/opt/dn42-peering/server
+ExecStart=/usr/bin/node --no-warnings src/index.js
+Environment=PEERING_CONFIG=/opt/dn42-peering/config/config.json
+Environment=PEERING_NODES=/opt/dn42-peering/config/nodes.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/dn42-peering/server/data
+# gpg/ssh-keygen signature verification needs a writable tmp
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

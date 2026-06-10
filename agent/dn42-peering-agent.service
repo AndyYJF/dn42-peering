@@ -1,0 +1,18 @@
+[Unit]
+Description=dn42-peering node agent
+After=network-online.target bird.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/dn42-peering/agent.py
+Environment=AGENT_CONF=/etc/dn42-peering-agent.json
+Restart=on-failure
+RestartSec=5
+# The agent must run as root: it manages /etc/wireguard, /etc/bird/peers,
+# wg-quick and birdc. Lock it down as far as possible anyway:
+NoNewPrivileges=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

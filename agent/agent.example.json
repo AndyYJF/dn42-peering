@@ -1,0 +1,15 @@
+{
+  "listen": "0.0.0.0",
+  "port": 8643,
+  "token": "CHANGE-ME-this-node-agent-token",
+  "our_asn": 4242421234,
+  "allow_from": ["127.0.0.1/32", "172.21.118.160/28"],
+  "dry_run": false,
+  "wg_dir": "/etc/wireguard",
+  "wg_private_key_file": "/etc/wireguard/privatekey",
+  "bird_peer_dir": "/etc/bird/peers",
+  "state_file": "/var/lib/dn42-peering/peers.json",
+  "bird_template": "",
+  "wg_template": "",
+  "iface_prefix": "dn42-"
+}
