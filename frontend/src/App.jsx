@@ -16,6 +16,29 @@ function Clock() {
   return <span className="clock">{now.toISOString().slice(11, 19)} UTC</span>;
 }
 
+function ThemeToggle() {
+  const [theme, setTheme] = useState(
+    () => document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+  );
+  useEffect(() => {
+    if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    try { localStorage.setItem('pd-theme', theme); } catch { /* ignore */ }
+  }, [theme]);
+  const next = theme === 'light' ? 'dark' : 'light';
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={() => setTheme(next)}
+      title={`Switch to ${next} mode`}
+      aria-label={`Switch to ${next} mode`}
+    >
+      {theme === 'light' ? 'DARK' : 'LIGHT'}
+    </button>
+  );
+}
+
 function TopBar({ info, auth, onLogout }) {
   return (
     <header className="topbar">
@@ -36,6 +59,7 @@ function TopBar({ info, auth, onLogout }) {
         </nav>
         <div className="topbar-right">
           <Clock />
+          <ThemeToggle />
           {auth && (
             <span className="auth-chip">
               <Led color="grn" />

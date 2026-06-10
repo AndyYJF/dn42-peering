@@ -24,13 +24,86 @@
   --blu: #6cb6ff;
 
   --txt: #dde4ec;
-  --mut: #8a94a3;
-  --dim: #555f6e;
+  --mut: #9aa6b6;
+  --dim: #6c7888;
+
+  /* surface tokens (theme-aware) */
+  --input-bg: #0a0d11;
+  --pre-bg: #07090c;
+  --pre-txt: #b9c4d2;
+  --topbar-bg: rgba(8, 9, 12, 0.88);
+  --screw: #3b4757;
+  --led-off: #2a313c;
+  --topo-link: #28313f;
+  --topo-chip: #11161d;
+  --btn-ink: #140e00;
+  --hover-soft: rgba(255, 255, 255, 0.03);
+  --hover-row: rgba(255, 255, 255, 0.015);
+  --tag-bg: rgba(0, 0, 0, 0.25);
+  --chip-bg: rgba(0, 0, 0, 0.2);
+  --panel-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  /* atmosphere */
+  --spill-amber: rgba(255, 176, 0, 0.07);
+  --spill-blu: rgba(108, 182, 255, 0.05);
+  --grid-line: rgba(140, 160, 190, 0.045);
+  --scan-color: rgba(0, 0, 0, 0.16);
+  --scan-opacity: 0.35;
+  --scan-blend: multiply;
 
   --fd: 'Doto', monospace;
   --fm: 'Martian Mono', monospace;
 
   --maxw: 1180px;
+}
+
+/* ============================================================
+   LIGHT THEME — "blueprint on paper": pale chassis, burnt-amber
+   ink with real contrast, LEDs stay lit & saturated.
+   ============================================================ */
+[data-theme='light'] {
+  --bg0: #eef1f5;
+  --bg1: #e8ecf2;
+  --panel: #ffffff;
+  --panel2: #f4f7fa;
+  --line: #c8d1dc;
+  --line-soft: #dde3ea;
+  --line-hi: #aab6c4;
+
+  --amber: #9a5e00;
+  --amber-hi: #c47a00;
+  --amber-dim: rgba(154, 94, 0, 0.10);
+  --amber-glow: rgba(154, 94, 0, 0.22);
+  --grn: #1f9d57;
+  --grn-glow: rgba(31, 157, 87, 0.30);
+  --red: #cf3636;
+  --red-glow: rgba(207, 54, 54, 0.30);
+  --blu: #2766ad;
+
+  --txt: #1a2230;
+  --mut: #4c5765;
+  --dim: #6d7888;
+
+  --input-bg: #ffffff;
+  --pre-bg: #f3f6f9;
+  --pre-txt: #2b3543;
+  --topbar-bg: rgba(238, 241, 245, 0.9);
+  --screw: #b3bdca;
+  --led-off: #c3ccd6;
+  --topo-link: #c0cad6;
+  --topo-chip: #f4f7fa;
+  --btn-ink: #fff6e8;
+  --hover-soft: rgba(0, 0, 0, 0.035);
+  --hover-row: rgba(0, 0, 0, 0.02);
+  --tag-bg: rgba(255, 255, 255, 0.6);
+  --chip-bg: rgba(255, 255, 255, 0.55);
+  --panel-shadow: 0 10px 30px rgba(40, 60, 90, 0.10);
+
+  --spill-amber: rgba(255, 176, 0, 0.10);
+  --spill-blu: rgba(40, 110, 190, 0.06);
+  --grid-line: rgba(70, 100, 140, 0.06);
+  --scan-color: rgba(120, 140, 170, 0.10);
+  --scan-opacity: 0.5;
+  --scan-blend: normal;
 }
 
 * { box-sizing: border-box; }
@@ -55,10 +128,10 @@ body::before {
   inset: 0;
   z-index: -2;
   background:
-    radial-gradient(900px 500px at 12% -10%, rgba(255, 176, 0, 0.07), transparent 60%),
-    radial-gradient(700px 500px at 95% 110%, rgba(108, 182, 255, 0.05), transparent 60%),
-    repeating-linear-gradient(0deg, transparent 0 47px, rgba(140, 160, 190, 0.045) 47px 48px),
-    repeating-linear-gradient(90deg, transparent 0 47px, rgba(140, 160, 190, 0.045) 47px 48px),
+    radial-gradient(900px 500px at 12% -10%, var(--spill-amber), transparent 60%),
+    radial-gradient(700px 500px at 95% 110%, var(--spill-blu), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 47px, var(--grid-line) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, var(--grid-line) 47px 48px),
     var(--bg0);
 }
 body::after {
@@ -67,12 +140,12 @@ body::after {
   inset: 0;
   z-index: 100;
   pointer-events: none;
-  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
-  opacity: 0.35;
-  mix-blend-mode: multiply;
+  background: repeating-linear-gradient(0deg, var(--scan-color) 0 1px, transparent 1px 3px);
+  opacity: var(--scan-opacity);
+  mix-blend-mode: var(--scan-blend);
 }
 
-::selection { background: var(--amber); color: #140e00; }
+::selection { background: var(--amber); color: var(--btn-ink); }
 
 a { color: var(--amber); text-decoration: none; }
 a:hover { color: var(--amber-hi); }
@@ -126,14 +199,14 @@ h1, h2, h3 { margin: 0; font-weight: inherit; }
   position: relative;
   background: linear-gradient(180deg, var(--panel2), var(--panel));
   border: 1px solid var(--line);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 14px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, var(--panel-shadow);
 }
 .panel.screws {
   background-image:
-    radial-gradient(2px 2px at 9px 9px, #3b4757 49%, transparent 52%),
-    radial-gradient(2px 2px at calc(100% - 9px) 9px, #3b4757 49%, transparent 52%),
-    radial-gradient(2px 2px at 9px calc(100% - 9px), #3b4757 49%, transparent 52%),
-    radial-gradient(2px 2px at calc(100% - 9px) calc(100% - 9px), #3b4757 49%, transparent 52%),
+    radial-gradient(2px 2px at 9px 9px, var(--screw) 49%, transparent 52%),
+    radial-gradient(2px 2px at calc(100% - 9px) 9px, var(--screw) 49%, transparent 52%),
+    radial-gradient(2px 2px at 9px calc(100% - 9px), var(--screw) 49%, transparent 52%),
+    radial-gradient(2px 2px at calc(100% - 9px) calc(100% - 9px), var(--screw) 49%, transparent 52%),
     linear-gradient(180deg, var(--panel2), var(--panel));
 }
 
@@ -164,7 +237,7 @@ h1, h2, h3 { margin: 0; font-weight: inherit; }
 .led.grn { background: var(--grn); box-shadow: 0 0 8px var(--grn-glow), 0 0 2px var(--grn); }
 .led.amber { background: var(--amber); box-shadow: 0 0 8px var(--amber-glow), 0 0 2px var(--amber); }
 .led.red { background: var(--red); box-shadow: 0 0 8px var(--red-glow), 0 0 2px var(--red); }
-.led.off { background: #2a313c; }
+.led.off { background: var(--led-off); }
 .led.blink { animation: led-blink 1.1s steps(2, start) infinite; }
 @keyframes led-blink { 50% { opacity: 0.25; } }
 
@@ -180,7 +253,7 @@ h1, h2, h3 { margin: 0; font-weight: inherit; }
   padding: 4px 9px;
   border: 1px solid var(--line);
   color: var(--mut);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--tag-bg);
   white-space: nowrap;
 }
 .tag.grn { color: var(--grn); border-color: rgba(61, 220, 132, 0.35); }
@@ -195,7 +268,7 @@ h1, h2, h3 { margin: 0; font-weight: inherit; }
   color: var(--mut);
   border: 1px solid var(--line);
   padding: 2px 7px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--chip-bg);
 }
 
 /* ---------- buttons ---------- */
@@ -214,10 +287,10 @@ h1, h2, h3 { margin: 0; font-weight: inherit; }
   transition: background 0.15s, box-shadow 0.2s, color 0.15s, border-color 0.15s;
 }
 .btn:hover:not(:disabled) { background: var(--amber-dim); box-shadow: 0 0 22px rgba(255, 176, 0, 0.18); }
-.btn.solid { background: var(--amber); color: #140e00; }
+.btn.solid { background: var(--amber); color: var(--btn-ink); }
 .btn.solid:hover:not(:disabled) { background: var(--amber-hi); box-shadow: 0 0 26px var(--amber-glow); }
 .btn.ghost { border-color: var(--line); color: var(--mut); }
-.btn.ghost:hover:not(:disabled) { border-color: var(--mut); color: var(--txt); background: rgba(255, 255, 255, 0.03); box-shadow: none; }
+.btn.ghost:hover:not(:disabled) { border-color: var(--mut); color: var(--txt); background: var(--hover-soft); box-shadow: none; }
 .btn.danger { border-color: rgba(255, 93, 93, 0.5); color: var(--red); }
 .btn.danger:hover:not(:disabled) { background: rgba(255, 93, 93, 0.1); box-shadow: 0 0 18px rgba(255, 93, 93, 0.15); }
 .btn.sm { padding: 7px 13px; font-size: 10px; }
@@ -242,7 +315,7 @@ input[type='text'], textarea, select {
   font-family: var(--fm);
   font-size: 13px;
   color: var(--txt);
-  background: #0a0d11;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   padding: 11px 13px;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -283,13 +356,13 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
 .copyblock { position: relative; margin: 14px 0; }
 .copyblock pre {
   margin: 0;
-  background: #07090c;
+  background: var(--pre-bg);
   border: 1px solid var(--line);
   padding: 16px 18px;
   font-size: 12px;
   line-height: 1.7;
   overflow-x: auto;
-  color: #b9c4d2;
+  color: var(--pre-txt);
 }
 .copyblock .copy-label {
   position: absolute;
@@ -324,7 +397,7 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(8, 9, 12, 0.88);
+  background: var(--topbar-bg);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line-soft);
 }
@@ -364,6 +437,20 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
 
 .topbar-right { display: flex; align-items: center; gap: 14px; }
 .clock { font-size: 11px; color: var(--dim); letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+.theme-toggle {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mut);
+  background: var(--chip-bg);
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.theme-toggle:hover { color: var(--amber); border-color: var(--amber); }
 .auth-chip {
   display: flex;
   align-items: center;
@@ -423,7 +510,7 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
 /* ---------- topology ---------- */
 
 .topo-svg { width: 100%; height: auto; display: block; }
-.topo-link { stroke: #28313f; stroke-width: 1; }
+.topo-link { stroke: var(--topo-link); stroke-width: 1; }
 .topo-flow {
   stroke: var(--amber);
   stroke-width: 1.2;
@@ -433,7 +520,7 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
   opacity: 0.85;
 }
 @keyframes flow { to { stroke-dashoffset: -126; } }
-.topo-chip rect { fill: #11161d; stroke: var(--line); }
+.topo-chip rect { fill: var(--topo-chip); stroke: var(--line); }
 .topo-chip:hover rect { stroke: var(--amber); }
 .topo-chip text { fill: var(--txt); font-family: var(--fm); }
 .topo-center text { fill: var(--dim); font-family: var(--fm); letter-spacing: 3px; }
@@ -548,7 +635,7 @@ table.grid th {
   font-weight: 400;
 }
 table.grid td { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
-table.grid tr:hover td { background: rgba(255, 255, 255, 0.015); }
+table.grid tr:hover td { background: var(--hover-row); }
 
 /* ---------- footer ---------- */
 
