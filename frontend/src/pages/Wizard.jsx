@@ -106,7 +106,12 @@ function StepAuth({ auth, onAuthed, onNext }) {
                   type="radio"
                   name="method"
                   checked={method === m.idx}
-                  onChange={() => setMethod(m.idx)}
+                  onChange={() => {
+                    setMethod(m.idx);
+                    setChallenge(null); // collapse any previous challenge UI
+                    setSignature('');
+                    setError('');
+                  }}
                 />
                 <span className="chip">{m.type === 'pgp' ? 'PGP' : m.type === 'email' ? 'MAIL' : 'SSH'}</span>
                 <span className="mono-cut" title={m.display}>{m.display}</span>
@@ -117,7 +122,9 @@ function StepAuth({ auth, onAuthed, onNext }) {
               <button className="btn" onClick={doChallenge} disabled={busy || method == null} style={{ marginTop: 10 }}>
                 {busy && method != null && !challenge
                   ? <Spinner />
-                  : lookup.methods[method]?.type === 'email' ? 'Send code' : 'Generate challenge'}
+                  : lookup.methods[method]?.type === 'email'
+                    ? (challenge?.method === 'email' ? 'Resend code' : 'Send code')
+                    : (challenge && challenge.method !== 'email' ? 'New challenge' : 'Generate challenge')}
               </button>
             )}
           </>
@@ -134,8 +141,8 @@ function StepAuth({ auth, onAuthed, onNext }) {
               <input
                 type="text"
                 value={signature}
-                onChange={(e) => setSignature(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && signature.trim() && doVerify()}
+                onChange={(e) => setSignature(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onKeyDown={(e) => e.key === 'Enter' && signature.length === 6 && doVerify()}
                 placeholder="000000"
                 style={{ letterSpacing: '0.5em', fontSize: 18, maxWidth: 220 }}
                 maxLength={6}
@@ -143,7 +150,7 @@ function StepAuth({ auth, onAuthed, onNext }) {
                 autoComplete="one-time-code"
               />
             </Field>
-            <button className="btn solid" onClick={doVerify} disabled={busy || !signature.trim()}>
+            <button className="btn solid" onClick={doVerify} disabled={busy || signature.length !== 6}>
               {busy ? <Spinner /> : 'Verify & continue →'}
             </button>
           </>

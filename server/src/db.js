@@ -79,6 +79,6 @@ export const q = {
   getChallenge: db.prepare('SELECT * FROM challenges WHERE id = ?'),
   useChallenge: db.prepare('UPDATE challenges SET used = 1 WHERE id = ?'),
   bumpAttempts: db.prepare('UPDATE challenges SET attempts = attempts + 1 WHERE id = ?'),
-  recentEmailChallenges: db.prepare("SELECT COUNT(*) AS n FROM challenges WHERE asn = ? AND method = 'email' AND expires_at > ?"),
+  recentEmailChallenges: db.prepare("SELECT COUNT(*) AS n FROM challenges WHERE asn = ? AND method = 'email' AND used = 0 AND attempts < 5 AND expires_at > ?"),
   recentEvents: db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?'),
 };
