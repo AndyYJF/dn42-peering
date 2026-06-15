@@ -35,6 +35,22 @@ const defaults = {
   challengeTtlSec: 900,
   jwtTtlSec: 86400,
   maxPeeringsPerAsn: 4,
+  maxEmailCodesPerWindow: 5, // hard cap on verification e-mails per ASN and per recipient within challengeTtlSec
+  // Content-Security-Policy for the served SPA. script-src/connect-src are strict
+  // ('self' only) so an injected script can't run inline or exfiltrate the token;
+  // Google Fonts is allowed for style/font. Set to null/'' to disable, or override.
+  contentSecurityPolicy: [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "img-src 'self' data:",
+    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self'",
+    "connect-src 'self'",
+  ].join('; '),
 };
 
 const fileCfg = loadJson(resolveConfigFile('PEERING_CONFIG', 'config'));
@@ -58,8 +74,27 @@ if (!config.jwtSecret || config.jwtSecret.startsWith('CHANGE-ME')) {
   }
 }
 
+// DEMO MODE disables signature/admin/email checks and uses a public JWT secret.
+// Never let it come up in production unless explicitly forced.
+if (config.demo && process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO !== '1') {
+  console.error('[config] refusing to start in DEMO MODE with NODE_ENV=production (set ALLOW_DEMO=1 only if you truly intend an open demo).');
+  process.exit(1);
+}
+
 export const nodes = nodesCfg.nodes;
 export const nodeById = (id) => nodes.find((n) => n.id === id);
+
+// The agent bearer token is sent on every call; over plaintext http to a
+// non-loopback host it can be sniffed (-> root RCE on the node). Warn loudly.
+if (!config.demo) {
+  for (const n of nodes || []) {
+    const url = String(n.agentUrl || '');
+    const loopback = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(url);
+    if (url.startsWith('http://') && !loopback) {
+      console.warn(`[config] node ${n.id}: agentUrl is plaintext http:// to a non-loopback host — the agent token is exposed on the wire. Use https or a private encrypted management network.`);
+    }
+  }
+}
 
 /** Public view of a node — never leak agent URL/token. */
 export function publicNode(n) {

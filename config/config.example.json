@@ -25,6 +25,7 @@
     [4201270000, 4201279999]
   ],
   "challengeTtlSec": 900,
+  "maxEmailCodesPerWindow": 5,
   "jwtTtlSec": 86400,
   "maxPeeringsPerAsn": 4
 }

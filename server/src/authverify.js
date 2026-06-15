@@ -23,7 +23,9 @@ export function verifySsh(pubkeyLine, challenge, signature) {
     ], { input: challenge, encoding: 'utf8', timeout: 10000 });
     if (res.error) return { ok: false, error: `ssh-keygen unavailable: ${res.error.message}` };
     if (res.status === 0) return { ok: true };
-    return { ok: false, error: (res.stderr || res.stdout || 'signature mismatch').trim().slice(0, 300) };
+    const detail = (res.stderr || res.stdout || '').trim().slice(0, 300);
+    if (detail) console.warn('[authverify] ssh-keygen verify failed:', detail); // log server-side, don't leak to client
+    return { ok: false, error: 'signature did not verify against your registry key' };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -95,9 +97,15 @@ export async function verifyPgp(fingerprint, clearsigned, challenge, pastedKey) 
     const status = ver.stderr || '';
     const valid = status.split('\n').find((l) => l.includes('[GNUPG:] VALIDSIG'));
     if (!valid) return { ok: false, error: 'no valid signature found' };
-    const sigFpr = valid.trim().split(/\s+/)[2]?.toUpperCase() || '';
-    const want = fingerprint.toUpperCase();
-    if (sigFpr !== want && !sigFpr.endsWith(want)) return { ok: false, error: 'signature made by a different key' };
+    const fields = valid.trim().split(/\s+/);
+    const sigFpr = (fields[2] || '').toUpperCase();           // fingerprint of the signing (sub)key
+    const primaryFpr = (fields[fields.length - 1] || '').toUpperCase(); // primary key fingerprint
+    const want = fingerprint.toUpperCase().replace(/[^0-9A-F]/g, '');
+    if (want.length !== 40 && want.length !== 64) {
+      return { ok: false, error: 'registry PGP fingerprint must be a full 40- or 64-hex fingerprint' };
+    }
+    // exact match against the signing key or its primary key — no suffix matching
+    if (want !== sigFpr && want !== primaryFpr) return { ok: false, error: 'signature made by a different key' };
     if (!(ver.stdout || '').includes(challenge)) return { ok: false, error: 'signed text does not contain the challenge' };
     return { ok: true };
   } finally {

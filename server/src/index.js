@@ -13,6 +13,14 @@ const app = express();
 
 app.disable('x-powered-by');
 if (config.trustProxy) app.set('trust proxy', config.trustProxy);
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');                 // admin console must not be framed (clickjacking)
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  if (config.contentSecurityPolicy) res.setHeader('Content-Security-Policy', config.contentSecurityPolicy);
+  next();
+});
 app.use(express.json({ limit: '64kb' }));
 
 app.use('/api', publicRouter);

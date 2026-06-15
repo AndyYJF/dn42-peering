@@ -13,6 +13,12 @@ export function verify(token, secret) {
   const parts = String(token || '').split('.');
   if (parts.length !== 3) return null;
   const [header, body, sig] = parts;
+  try {
+    const h = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'));
+    if (h.alg !== 'HS256' || (h.typ && h.typ !== 'JWT')) return null; // pin alg; reject none/RS256 confusion
+  } catch {
+    return null;
+  }
   const expected = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
   if (sig.length !== expected.length || !timingSafeEqualStr(sig, expected)) return null;
   try {

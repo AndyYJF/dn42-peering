@@ -53,6 +53,13 @@ authRouter.post('/challenge', async (req, res) => {
       if (q.recentEmailChallenges.get(asn, Date.now()).n >= 3) {
         return res.status(429).json({ error: 'too many codes requested — wait for the previous ones to expire' });
       }
+      // hard ceiling on total sends per rolling window (per ASN and per recipient),
+      // independent of used/attempts — stops "burn attempts then re-request" mail-bombing
+      const cap = config.maxEmailCodesPerWindow;
+      if (q.emailCodesForAsnWindow.get(asn, Date.now()).n >= cap ||
+          q.emailCodesForRecipientWindow.get(method.keyData, Date.now()).n >= cap) {
+        return res.status(429).json({ error: 'too many verification e-mails recently — try again later' });
+      }
       const code = String(randomInt(0, 1000000)).padStart(6, '0');
       q.insertChallenge.run(id, asn, method.mntner, 'email', method.keyData,
         code, Date.now() + config.challengeTtlSec * 1000);

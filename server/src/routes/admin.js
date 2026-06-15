@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { config, nodes, nodeById, publicNode } from '../config.js';
 import { q, logEvent } from '../db.js';
 import { toApi, deploy } from './peerings.js';
@@ -6,13 +7,20 @@ import { agentHealth, safeRemove } from '../agents.js';
 
 export const adminRouter = Router();
 
+/** Constant-time string compare; false (without leaking via timing) on length mismatch. */
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a ?? ''));
+  const bb = Buffer.from(String(b ?? ''));
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
 adminRouter.use((req, res, next) => {
   if (!config.adminToken || config.adminToken.startsWith('CHANGE-ME')) {
     if (!config.demo) return res.status(503).json({ error: 'adminToken not configured' });
   }
   const token = req.headers['x-admin-token'];
   if (config.demo && token === 'demo') return next();
-  if (token !== config.adminToken) return res.status(401).json({ error: 'bad admin token' });
+  if (!safeEqual(token, config.adminToken)) return res.status(401).json({ error: 'bad admin token' });
   next();
 });
 
