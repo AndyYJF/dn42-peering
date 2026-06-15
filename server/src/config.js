@@ -27,6 +27,7 @@ const defaults = {
   adminToken: '',
   autoApprove: true,
   demo: false,
+  trustProxy: false,
   registry: { localPath: '', api: 'https://explorer.burble.com/api/registry' },
   keyserver: 'keys.openpgp.org',
   smtp: { host: '', port: 587, user: '', pass: '', from: '' },

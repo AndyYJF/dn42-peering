@@ -16,6 +16,7 @@ API (Bearer token):
 
 import ipaddress
 import json
+import hmac
 import os
 import re
 import shutil
@@ -29,11 +30,11 @@ from pathlib import Path
 CONF_PATH = os.environ.get("AGENT_CONF", "/etc/dn42-peering-agent.json")
 
 DEFAULTS = {
-    "listen": "0.0.0.0",
+    "listen": "127.0.0.1",
     "port": 8643,
     "token": "",
     "our_asn": 4242420000,
-    "allow_from": [],             # source-IP allowlist (CIDRs); [] = allow all
+    "allow_from": ["127.0.0.1/32", "::1/128"],
     "dry_run": False,
     "wg_dir": "/etc/wireguard",
     "wg_private_key_file": "/etc/wireguard/dn42-node.key",
@@ -148,6 +149,116 @@ class Conflict(Exception):
 class Invalid(Exception):
     pass
 
+WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$")
+HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$", re.I)
+IFACE_RE = re.compile(r"^[A-Za-z0-9_.=-]{1,15}$")
+DN42_V4_NETS = [ipaddress.ip_network("10.0.0.0/8"), ipaddress.ip_network("172.20.0.0/14"), ipaddress.ip_network("172.31.0.0/16")]
+DN42_V6_NET = ipaddress.ip_network("fd00::/8")
+LL_NET = ipaddress.ip_network("fe80::/64")
+
+def reject_controls(name, value):
+    if not isinstance(value, str):
+        raise Invalid("%s must be a string" % name)
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise Invalid("%s contains control characters" % name)
+    return value.strip()
+
+def validate_asn(asn):
+    if not isinstance(asn, int) or asn < 1 or asn > 4294967295:
+        raise Invalid("invalid ASN")
+    return asn
+
+def validate_port(port):
+    if isinstance(port, str) and port.isdigit():
+        port = int(port)
+    if not isinstance(port, int) or port < 1 or port > 65535:
+        raise Invalid("wg_port must be 1-65535")
+    return port
+
+def validate_wg_key(key):
+    key = reject_controls("peer_pubkey", key)
+    if not WG_KEY_RE.match(key):
+        raise Invalid("invalid WireGuard public key")
+    return key
+
+def validate_link_local(name, addr):
+    addr = reject_controls(name, addr)
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        raise Invalid("%s must be an IPv6 link-local address in fe80::/64" % name)
+    if ip.version != 6 or ip not in LL_NET:
+        raise Invalid("%s must be an IPv6 link-local address in fe80::/64" % name)
+    return addr
+
+def validate_endpoint(endpoint):
+    if endpoint in (None, ""):
+        return None
+    endpoint = reject_controls("peer_endpoint", endpoint)
+    if endpoint.startswith("["):
+        end = endpoint.find("]")
+        if end == -1 or end + 1 >= len(endpoint) or endpoint[end + 1] != ":":
+            raise Invalid("endpoint must be host:port")
+        host, port_s = endpoint[1:end], endpoint[end + 2:]
+        try:
+            if ipaddress.ip_address(host).version != 6:
+                raise ValueError
+        except ValueError:
+            raise Invalid("endpoint IPv6 literal is invalid")
+    else:
+        if endpoint.count(":") != 1:
+            raise Invalid("endpoint must be host:port")
+        host, port_s = endpoint.rsplit(":", 1)
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            if not HOST_RE.match(host):
+                raise Invalid("endpoint hostname is invalid")
+    if not port_s.isdigit() or not (1 <= int(port_s) <= 65535):
+        raise Invalid("endpoint port must be 1-65535")
+    return endpoint
+
+def validate_optional_dn42(name, addr):
+    if addr in (None, ""):
+        return None
+    addr = reject_controls(name, addr)
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        raise Invalid("%s is not a valid IP address" % name)
+    if ip.version == 4 and not any(ip in net for net in DN42_V4_NETS):
+        raise Invalid("%s must be a DN42 IPv4 address" % name)
+    if ip.version == 6 and ip not in DN42_V6_NET:
+        raise Invalid("%s must be a ULA IPv6 address" % name)
+    return addr
+
+def validate_iface(iface):
+    iface = reject_controls("iface", iface)
+    if not IFACE_RE.match(iface) or "/" in iface or "\\" in iface or iface in (".", ".."):
+        raise Invalid("invalid interface name")
+    return iface
+
+def safe_conf_path(base_dir, filename):
+    base = Path(base_dir).resolve()
+    path = (base / filename).resolve()
+    if path.parent != base:
+        raise Invalid("configuration path escapes %s" % base)
+    return path
+
+def validate_spec(spec):
+    spec["asn"] = validate_asn(spec.get("asn"))
+    spec["iface"] = validate_iface(iface_name(spec["asn"]))
+    spec["wg_port"] = validate_port(spec.get("wg_port"))
+    spec["peer_pubkey"] = validate_wg_key(spec.get("peer_pubkey"))
+    spec["peer_endpoint"] = validate_endpoint(spec.get("peer_endpoint"))
+    spec["peer_ll"] = validate_link_local("peer_ll", spec.get("peer_ll"))
+    spec["our_ll"] = validate_link_local("our_ll", spec.get("our_ll"))
+    spec["peer_v4"] = validate_optional_dn42("peer_v4", spec.get("peer_v4"))
+    spec["peer_v6"] = validate_optional_dn42("peer_v6", spec.get("peer_v6"))
+    spec["enh"] = bool(spec.get("enh"))
+    spec["mp_bgp"] = bool(spec.get("mp_bgp", True))
+    return spec
+
 def check_endpoint_resolves(endpoint):
     """Fail fast on unresolvable endpoint hostnames — wg-quick would retry DNS for ages."""
     if not endpoint:
@@ -232,9 +343,10 @@ def bird_reconfigure(check=True):
     return res
 
 def apply_peer(spec):
-    iface = spec["iface"] = spec.get("iface") or iface_name(spec["asn"])
-    wg_conf = Path(CONF["wg_dir"]) / ("%s.conf" % iface)
-    bird_conf = Path(CONF["bird_peer_dir"]) / ("%s.conf" % proto_name(spec["asn"]))
+    spec = validate_spec(spec)
+    iface = spec["iface"]
+    wg_conf = safe_conf_path(CONF["wg_dir"], "%s.conf" % iface)
+    bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % proto_name(spec["asn"]))
     wg_conf.parent.mkdir(parents=True, exist_ok=True)
     bird_conf.parent.mkdir(parents=True, exist_ok=True)
 
@@ -339,7 +451,7 @@ class Handler(BaseHTTPRequestHandler):
             if not any(src in ipaddress.ip_network(c) for c in CONF["allow_from"]):
                 return False
         auth = self.headers.get("Authorization", "")
-        return auth == "Bearer %s" % CONF["token"]
+        return hmac.compare_digest(auth, "Bearer %s" % CONF["token"])
 
     def _route(self):
         if not self._authed():
@@ -364,6 +476,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"bgp": bgp_status(asn), "wireguard": wg_status(asn)})
                 if self.command == "PUT" and len(parts) == 2:
                     length = int(self.headers.get("Content-Length", 0))
+                    if length > 65536:
+                        return self._send(413, {"error": "request body too large"})
                     spec = json.loads(self.rfile.read(length))
                     spec["asn"] = asn
                     for field in ("wg_port", "peer_pubkey", "peer_ll", "our_ll"):

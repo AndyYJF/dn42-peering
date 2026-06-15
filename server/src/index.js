@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.disable('x-powered-by');
-app.set('trust proxy', true);
+if (config.trustProxy) app.set('trust proxy', config.trustProxy);
 app.use(express.json({ limit: '64kb' }));
 
 app.use('/api', publicRouter);

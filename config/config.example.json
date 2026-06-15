@@ -7,6 +7,7 @@
   "adminToken": "CHANGE-ME-admin-token",
   "autoApprove": true,
   "demo": false,
+  "trustProxy": false,
   "registry": {
     "localPath": "",
     "api": "https://explorer.burble.com/api/registry"

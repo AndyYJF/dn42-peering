@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { config } from './config.js';
 
 /** Validation + small helpers shared by routes. */
@@ -7,7 +8,22 @@ export const isValidAsn = (asn) =>
 
 export const isWgKey = (s) => typeof s === 'string' && /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/.test(s.trim());
 
-export const isLinkLocal = (s) => typeof s === 'string' && /^fe80:(:[0-9a-f]{0,4}){1,4}$/i.test(s.trim());
+function hextets(addr) {
+  if (typeof addr !== 'string' || isIP(addr) !== 6 || addr.includes('.')) return null;
+  const [left, right = ''] = addr.toLowerCase().split('::');
+  const l = left ? left.split(':') : [];
+  const r = right ? right.split(':') : [];
+  const missing = 8 - l.length - r.length;
+  if (missing < 0) return null;
+  const parts = [...l, ...Array(missing).fill('0'), ...r];
+  if (parts.length !== 8) return null;
+  return parts.map((p) => parseInt(p || '0', 16));
+}
+
+export const isLinkLocal = (s) => {
+  const h = hextets(String(s || '').trim());
+  return !!h && h[0] === 0xfe80 && h[1] === 0 && h[2] === 0 && h[3] === 0;
+};
 
 export function isDn42V4(s) {
   if (typeof s !== 'string') return false;
@@ -20,12 +36,34 @@ export function isDn42V4(s) {
   return inCidr(0x0a000000, 8) || inCidr(0xac140000, 14) || inCidr(0xac1f0000, 16); // 10.0.0.0/8, 172.20.0.0/14, 172.31.0.0/16
 }
 
-export const isDn42V6 = (s) => typeof s === 'string' && /^fd[0-9a-f]{0,2}:[0-9a-f:]+$/i.test(s.trim());
+export const isDn42V6 = (s) => {
+  const h = hextets(String(s || '').trim());
+  return !!h && (h[0] & 0xff00) === 0xfd00;
+};
 
 // host:port — DNS name, IPv4, or [IPv6]
-export const isEndpoint = (s) =>
-  typeof s === 'string' &&
-  /^([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\]):\d{1,5}$/i.test(s.trim());
+const HOST_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/i;
+
+// host:port - DNS name, IPv4, or [IPv6]
+export function isEndpoint(s) {
+  if (typeof s !== 'string' || /[\r\n\t\0]/.test(s)) return false;
+  const value = s.trim();
+  let host, port;
+  if (value.startsWith('[')) {
+    const end = value.indexOf(']');
+    if (end < 0 || value[end + 1] !== ':') return false;
+    host = value.slice(1, end);
+    port = value.slice(end + 2);
+    if (isIP(host) !== 6) return false;
+  } else {
+    const parts = value.split(':');
+    if (parts.length !== 2) return false;
+    [host, port] = parts;
+    if (!(isIP(host) === 4 || HOST_RE.test(host))) return false;
+  }
+  const n = Number(port);
+  return Number.isInteger(n) && n >= 1 && n <= 65535;
+}
 
 export const ifaceName = (asn) => `dn42-${String(asn).slice(-4)}`;
 
