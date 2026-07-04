@@ -100,6 +100,21 @@ function LiveOverview({ rows, liveRows, issueCount, liveOk }) {
   );
 }
 
+function LiveIssueTag({ live }) {
+  if (!live || live.ok !== false) return null;
+  const label = live.bgpUp === false
+    ? 'BGP issue'
+    : live.wgUp === false
+      ? 'WG issue'
+      : 'Live issue';
+  return (
+    <span className="tag red" title={live.summary || ''} style={{ marginTop: 6, whiteSpace: 'normal', lineHeight: 1.35 }}>
+      <Led color="red" />
+      {label}
+    </span>
+  );
+}
+
 function TokenGate({ onToken }) {
   const [token, setToken] = useState('');
   return (
@@ -218,7 +233,7 @@ function PeeringsTable({ token, onError }) {
       <table className="grid">
         <thead>
           <tr>
-            <th>ASN</th><th>Maintainer</th><th>Node</th><th>Source</th><th>Port</th><th>Status</th><th>BGP</th><th>WG</th><th>Routes</th><th>Transfer</th><th>Endpoint</th><th>Created</th><th></th>
+            <th>ASN</th><th>Maintainer</th><th>Node</th><th>Source</th><th>Port</th><th>Config</th><th>BGP</th><th>WG</th><th>Routes</th><th>Transfer</th><th>Endpoint</th><th>Created</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -242,6 +257,7 @@ function PeeringsTable({ token, onError }) {
                 <td className="mut">{p.wgPort}</td>
                 <td>
                   <StatusTag status={p.status} />
+                  {p.status === 'active' && <LiveIssueTag live={live} />}
                   {p.lastError && <div className="xs red" title={p.lastError}>{p.lastError.slice(0, 48)}…</div>}
                 </td>
                 <td>

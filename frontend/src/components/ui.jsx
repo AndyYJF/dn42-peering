@@ -5,7 +5,7 @@ export function Led({ color = 'off', blink = false }) {
 }
 
 const STATUS_MAP = {
-  active: { color: 'grn', label: 'ACTIVE', blink: false },
+  active: { color: 'grn', label: 'ENABLED', blink: false },
   pending: { color: 'amber', label: 'PENDING APPROVAL', blink: true },
   deploying: { color: 'amber', label: 'DEPLOYING', blink: true },
   error: { color: 'red', label: 'ERROR', blink: false },
