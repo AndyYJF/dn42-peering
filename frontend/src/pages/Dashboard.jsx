@@ -92,13 +92,16 @@ function Session({ peering, onChanged, onDeleted }) {
         <span className="node-id">{peering.nodeId}</span>
         <span className="iface">{o?.iface} · port {peering.wgPort}</span>
         <StatusTag status={peering.status} />
+        {peering.source === 'manual' && <span className="chip amber">manual read-only</span>}
         <div className="right">
           <button className="btn sm" onClick={probe} disabled={busy}>{busy && view === 'status' ? <Spinner /> : 'Probe'}</button>
           <button className="btn sm ghost" onClick={() => setView(view === 'ourside' ? null : 'ourside')}>Our side</button>
-          <button className="btn sm ghost" onClick={() => setView(view === 'edit' ? null : 'edit')}>Edit</button>
-          <button className="btn sm danger" onClick={del} disabled={busy} onBlur={() => setConfirmDel(false)}>
-            {confirmDel ? 'Sure? click again' : 'Delete'}
-          </button>
+          {peering.source !== 'manual' && <button className="btn sm ghost" onClick={() => setView(view === 'edit' ? null : 'edit')}>Edit</button>}
+          {peering.source !== 'manual' && (
+            <button className="btn sm danger" onClick={del} disabled={busy} onBlur={() => setConfirmDel(false)}>
+              {confirmDel ? 'Sure? click again' : 'Delete'}
+            </button>
+          )}
         </div>
       </div>
 

@@ -3,7 +3,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { config, nodes, nodeById, publicNode } from '../config.js';
 import { q, logEvent } from '../db.js';
 import { toApi, deploy } from './peerings.js';
-import { agentHealth, safeRemove } from '../agents.js';
+import { agentHealth, discoverPeers, peerStatus, safeRemove } from '../agents.js';
+import { isEndpoint, isLinkLocal, isValidAsn, isWgKey } from '../util.js';
 
 export const adminRouter = Router();
 
@@ -28,13 +29,99 @@ adminRouter.get('/peerings', (req, res) => {
   res.json(q.allPeerings.all().map(toApi));
 });
 
+function liveStateFrom(status) {
+  const bgp = status?.bgp || null;
+  const wg = status?.wireguard || null;
+  const bgpUp = typeof bgp?.ok === 'boolean' ? bgp.ok : bgp?.state === 'Established';
+  const wgUp = typeof wg?.ok === 'boolean'
+    ? wg.ok
+    : typeof wg?.handshake_recent === 'boolean'
+      ? wg.handshake_recent
+      : typeof wg?.latest_handshake_age === 'number' && wg.latest_handshake_age <= 180;
+  const issues = [];
+  if (!bgp) {
+    issues.push({ code: 'bgp.no-data', message: 'BGP status is missing' });
+  } else {
+    if (bgp.error) issues.push({ code: 'bgp.error', message: bgp.error });
+    if (!bgpUp) issues.push({ code: 'bgp.down', message: `BGP is ${bgp.state || 'unknown'}` });
+  }
+  if (!wg) {
+    issues.push({ code: 'wg.no-data', message: 'WireGuard status is missing' });
+  } else {
+    if (wg.error) issues.push({ code: 'wg.error', message: wg.error });
+    if (!wgUp) {
+      const age = wg.latest_handshake_age;
+      const detail = age == null ? 'no handshake seen' : `last handshake ${age}s ago`;
+      issues.push({ code: 'wg.stale', message: `WireGuard is stale: ${detail}` });
+    }
+  }
+  return {
+    ok: issues.length === 0,
+    severity: issues.length ? 'critical' : 'ok',
+    summary: issues.length ? issues.map((i) => i.message).join('; ') : 'BGP established and WireGuard handshake is fresh',
+    issues,
+    bgpUp,
+    wgUp,
+    bgp,
+    wireguard: wg,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+adminRouter.get('/peerings/live', async (req, res) => {
+  const rows = q.allPeerings.all();
+  const results = await Promise.all(rows.map(async (p) => {
+    const base = { id: p.id, asn: p.asn, nodeId: p.node_id, status: p.status };
+    if (p.status !== 'active') {
+      return {
+        ...base,
+        live: {
+          ok: false,
+          severity: p.status === 'error' ? 'critical' : 'info',
+          skipped: true,
+          reason: p.status,
+          summary: `session is ${p.status}`,
+          issues: p.status === 'error' ? [{ code: 'session.error', message: p.last_error || 'session is in error state' }] : [],
+          checkedAt: new Date().toISOString(),
+        },
+      };
+    }
+    try {
+      const live = liveStateFrom(await peerStatus(nodeById(p.node_id), p));
+      return { ...base, live };
+    } catch (e) {
+      return {
+        ...base,
+        live: {
+          ok: false,
+          severity: 'critical',
+          summary: `agent unreachable: ${e.message}`,
+          issues: [{ code: 'agent.unreachable', message: e.message }],
+          bgpUp: false,
+          wgUp: false,
+          error: e.message,
+          checkedAt: new Date().toISOString(),
+        },
+      };
+    }
+  }));
+  res.json(results);
+});
+
 function adminAction(name, fn) {
   adminRouter.post(`/peerings/:id/${name}`, async (req, res) => {
     const p = q.peeringById.get(Number(req.params.id));
     if (!p) return res.status(404).json({ error: 'not found' });
-    await fn(p);
-    logEvent(p.asn, `admin.${name}`, p.node_id);
-    res.json(toApi(q.peeringById.get(p.id)));
+    if ((p.source || 'auto') === 'manual' && ['approve', 'redeploy', 'disable', 'enable'].includes(name)) {
+      return res.status(409).json({ error: 'manual sessions are read-only; change the node config and sync again' });
+    }
+    try {
+      await fn(p);
+      logEvent(p.asn, `admin.${name}`, p.node_id);
+      res.json(toApi(q.peeringById.get(p.id)));
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
   });
 }
 
@@ -49,10 +136,62 @@ adminAction('enable', async (p) => deploy(p));
 adminRouter.delete('/peerings/:id', async (req, res) => {
   const p = q.peeringById.get(Number(req.params.id));
   if (!p) return res.status(404).json({ error: 'not found' });
-  await safeRemove(p.node_id, p.asn);
+  if ((p.source || 'auto') !== 'manual') await safeRemove(p.node_id, p.asn);
   q.deletePeering.run(p.id);
-  logEvent(p.asn, 'admin.delete', p.node_id);
+  logEvent(p.asn, (p.source || 'auto') === 'manual' ? 'admin.forget-manual' : 'admin.delete', p.node_id);
   res.json({ ok: true });
+});
+
+function validDiscoveredPeer(peer) {
+  if (!isValidAsn(peer.asn)) return false;
+  if (!isWgKey(peer.peer_pubkey || '')) return false;
+  if (!isLinkLocal(peer.peer_ll || '')) return false;
+  if (peer.peer_endpoint && !isEndpoint(peer.peer_endpoint)) return false;
+  return true;
+}
+
+adminRouter.post('/peerings/sync-discovered', async (req, res) => {
+  const nodeFilter = req.query.node || req.body?.nodeId;
+  const targetNodes = nodeFilter ? nodes.filter((n) => n.id === nodeFilter) : nodes;
+  if (!targetNodes.length) return res.status(404).json({ error: 'node not found' });
+  const results = [];
+  for (const node of targetNodes) {
+    try {
+      const discovered = await discoverPeers(node);
+      let imported = 0;
+      let skipped = 0;
+      for (const peer of discovered.peers || []) {
+        if (!validDiscoveredPeer(peer) || peer.asn === config.ourAsn) {
+          skipped += 1;
+          continue;
+        }
+        const before = q.peeringByAsnNode.get(peer.asn, node.id);
+        q.upsertDiscoveredPeering.run(
+          peer.asn,
+          peer.mntner || 'DISCOVERED-MANUAL',
+          node.id,
+          peer.peer_pubkey,
+          peer.peer_endpoint || null,
+          peer.peer_ll,
+          peer.peer_v4 || null,
+          peer.peer_v6 || null,
+          peer.mp_bgp === false ? 0 : 1,
+          peer.enh === false ? 0 : 1,
+          Number(peer.wg_port || 0),
+          peer.iface || null,
+          peer.bgp_proto || null,
+        );
+        const after = q.peeringByAsnNode.get(peer.asn, node.id);
+        if (!before || before.source === 'manual' || after?.source === 'manual') imported += 1;
+        else skipped += 1;
+      }
+      logEvent(null, 'admin.sync-discovered', `${node.id}: imported ${imported}, skipped ${skipped}`);
+      results.push({ nodeId: node.id, ok: true, discovered: (discovered.peers || []).length, imported, skipped });
+    } catch (e) {
+      results.push({ nodeId: node.id, ok: false, error: e.message });
+    }
+  }
+  res.json({ ok: results.every((r) => r.ok), results });
 });
 
 adminRouter.get('/nodes/health', async (req, res) => {

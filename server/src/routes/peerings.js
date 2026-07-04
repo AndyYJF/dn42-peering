@@ -19,7 +19,7 @@ export function ourSide(p) {
     linkLocal: node.linkLocal,
     tunnelV4: node.tunnelV4 || null,
     dn42V6: node.dn42V6 || null,
-    iface: ifaceName(p.asn),
+    iface: p.iface || ifaceName(p.asn),
   };
 }
 
@@ -27,7 +27,8 @@ const toApi = (p) => ({
   id: p.id, asn: p.asn, mntner: p.mntner, nodeId: p.node_id, status: p.status,
   wgPubkey: p.wg_pubkey, wgEndpoint: p.wg_endpoint, peerLl: p.peer_ll,
   peerV4: p.peer_v4, peerV6: p.peer_v6, mpBgp: !!p.mp_bgp, enh: !!p.enh,
-  wgPort: p.wg_port, lastError: p.last_error, createdAt: p.created_at, updatedAt: p.updated_at,
+  wgPort: p.wg_port, source: p.source || 'auto', iface: p.iface || ifaceName(p.asn), bgpProto: p.bgp_proto || null,
+  lastError: p.last_error, createdAt: p.created_at, updatedAt: p.updated_at,
   ourSide: ourSide(p), node: nodeById(p.node_id) ? publicNode(nodeById(p.node_id)) : null,
 });
 
@@ -42,6 +43,9 @@ function validateTunnel(body) {
 }
 
 async function deploy(peering) {
+  if ((peering.source || 'auto') === 'manual') {
+    throw new Error('manual sessions are read-only; use the node config to change them');
+  }
   const node = nodeById(peering.node_id);
   // nodes may have manually-managed tunnels whose ports our DB doesn't know
   // about — on a port conflict the agent answers 409 and we retry with the
@@ -119,6 +123,7 @@ function ownPeering(req, res) {
 peeringsRouter.patch('/:id', async (req, res) => {
   const p = ownPeering(req, res);
   if (!p) return;
+  if ((p.source || 'auto') === 'manual') return res.status(409).json({ error: 'manual sessions are read-only; edit the node config and sync again' });
   const merged = {
     wgPubkey: req.body.wgPubkey ?? p.wg_pubkey,
     wgEndpoint: req.body.wgEndpoint !== undefined ? req.body.wgEndpoint : p.wg_endpoint,
@@ -148,6 +153,7 @@ peeringsRouter.patch('/:id', async (req, res) => {
 peeringsRouter.delete('/:id', async (req, res) => {
   const p = ownPeering(req, res);
   if (!p) return;
+  if ((p.source || 'auto') === 'manual') return res.status(409).json({ error: 'manual sessions are read-only; ask an operator to forget or change them' });
   await safeRemove(p.node_id, p.asn);
   q.deletePeering.run(p.id);
   logEvent(p.asn, 'peering.delete', p.node_id);
@@ -159,7 +165,7 @@ peeringsRouter.get('/:id/status', async (req, res) => {
   if (!p) return;
   if (p.status !== 'active') return res.json({ status: p.status, lastError: p.last_error });
   try {
-    const live = await peerStatus(nodeById(p.node_id), p.asn);
+    const live = await peerStatus(nodeById(p.node_id), p);
     res.json({ status: 'active', ...live });
   } catch (e) {
     res.status(502).json({ error: `agent unreachable: ${e.message}` });

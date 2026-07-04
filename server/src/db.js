@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS peerings (
   mp_bgp      INTEGER NOT NULL DEFAULT 1,
   enh         INTEGER NOT NULL DEFAULT 1,
   wg_port     INTEGER NOT NULL,
+  source      TEXT    NOT NULL DEFAULT 'auto',
+  iface       TEXT,
+  bgp_proto   TEXT,
   last_error  TEXT,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -58,6 +61,9 @@ export function logEvent(asn, action, detail = '') {
 
 // migration for databases created before the email-code login existed
 try { db.exec('ALTER TABLE challenges ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
+try { db.exec("ALTER TABLE peerings ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'"); } catch { /* already there */ }
+try { db.exec('ALTER TABLE peerings ADD COLUMN iface TEXT'); } catch { /* already there */ }
+try { db.exec('ALTER TABLE peerings ADD COLUMN bgp_proto TEXT'); } catch { /* already there */ }
 
 export const q = {
   peeringsByAsn: db.prepare('SELECT * FROM peerings WHERE asn = ? ORDER BY created_at'),
@@ -73,6 +79,24 @@ export const q = {
   updatePeering: db.prepare(`UPDATE peerings SET
     wg_pubkey = ?, wg_endpoint = ?, peer_ll = ?, peer_v4 = ?, peer_v6 = ?, mp_bgp = ?, enh = ?,
     updated_at = datetime('now') WHERE id = ?`),
+  upsertDiscoveredPeering: db.prepare(`INSERT INTO peerings
+    (asn, mntner, node_id, status, wg_pubkey, wg_endpoint, peer_ll, peer_v4, peer_v6, mp_bgp, enh, wg_port, source, iface, bgp_proto, last_error)
+    VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?, NULL)
+    ON CONFLICT(asn, node_id) DO UPDATE SET
+      wg_pubkey = excluded.wg_pubkey,
+      wg_endpoint = excluded.wg_endpoint,
+      peer_ll = excluded.peer_ll,
+      peer_v4 = excluded.peer_v4,
+      peer_v6 = excluded.peer_v6,
+      mp_bgp = excluded.mp_bgp,
+      enh = excluded.enh,
+      wg_port = excluded.wg_port,
+      iface = excluded.iface,
+      bgp_proto = excluded.bgp_proto,
+      status = CASE WHEN peerings.source = 'manual' THEN 'active' ELSE peerings.status END,
+      last_error = CASE WHEN peerings.source = 'manual' THEN NULL ELSE peerings.last_error END,
+      updated_at = datetime('now')
+    WHERE peerings.source = 'manual'`),
   setStatus: db.prepare("UPDATE peerings SET status = ?, last_error = ?, updated_at = datetime('now') WHERE id = ?"),
   deletePeering: db.prepare('DELETE FROM peerings WHERE id = ?'),
   insertChallenge: db.prepare('INSERT INTO challenges (id, asn, mntner, method, key_data, challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
