@@ -7,6 +7,5 @@ config/nodes.json
 *.log
 .DS_Store
 deploy/.work/
-network/.rendered/
 __pycache__/
 *.pyc

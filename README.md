@@ -22,7 +22,13 @@ DN42 自助 peering 系统（全栈）。外部 AS 在网页上验证身份 → 
 | `server/` | Node ≥22.5 + Express + `node:sqlite` | 控制面：DN42 registry 身份验证（SSH/PGP 挑战签名）、会话管理、向 agent 下发 |
 | `agent/` | Python 3 纯标准库（单文件） | 跑在每个节点：渲染并应用 wg-quick + BIRD2 配置、回报 BGP/WG 状态 |
 | `config/` | JSON | 站点配置与 4 个节点定义 |
-| `network/` | JSON + Python | Git 管理的四节点 OSPF/iBGP Full Mesh 清单、渲染与只读审计 |
+| `network/` | 文档 | 指向独立的四节点 OSPF/iBGP 核心配置仓库 |
+
+## 网络核心配置
+
+四节点 OSPF/iBGP Full Mesh 的清单、模板、验证、审计和事务部署工具已经迁移到
+[`AndyYJF/dn42-network-config`](https://github.com/AndyYJF/dn42-network-config)。
+本仓库只负责 Auto Peer 服务及外部 eBGP Peer 生命周期，不再维护核心网络配置副本。
 
 ## 身份验证原理
 
