@@ -43,7 +43,9 @@ for (const peering of candidates) {
 }
 
 let pending = [...expectedUp];
-const deadline = Date.now() + 60000;
+// A remote BIRD may keep the previous TCP/GR state for up to two minutes.
+// Allow one full hold/retry window before declaring the rolling batch failed.
+const deadline = Date.now() + 180000;
 while (pending.length && Date.now() < deadline) {
   const live = await admin(`/peerings/live?node=${encodeURIComponent(nodeId)}`);
   pending = pending.filter((id) => live.find((item) => item.id === id)?.live?.operationalState !== 'up');
@@ -51,6 +53,6 @@ while (pending.length && Date.now() < deadline) {
 }
 
 if (pending.length) {
-  throw new Error(`previously-up sessions did not recover within 60s: ${pending.join(', ')}`);
+  throw new Error(`previously-up sessions did not recover within 180s: ${pending.join(', ')}`);
 }
 console.log(JSON.stringify({ nodeId, migrated: candidates.length, verification: 'ok' }));
