@@ -60,3 +60,17 @@ cd deploy/.work && node update-agents.js
 cd .. && tar czf deploy/.work/bundle.tar.gz server/package.json server/src config/*.json frontend/dist deploy/dn42-peering-server.service
 cd deploy/.work && node deploy-server.js   # 幂等
 ```
+
+## Git 管理的 OSPF/iBGP 核心部署（2026-07-19）
+
+- `network/inventory.json` 已成为四节点 OSPF 成本、接口和 iBGP Full Mesh 的配置源。
+- `/etc/bird/peers/*` 仍归 Auto Peer Agent / 手工 Peer 所有，核心部署器不会读取、删除或覆盖该目录。
+- 所有节点生成配置都先在 `/tmp` 的完整 BIRD 副本中通过各自版本的 `bird -p`。
+- HKT 第一次金丝雀因生成目录权限不是 0755 被 BIRD 拒绝，部署器成功自动恢复；修复目录权限归一化后重试通过。
+- 成功部署备份：
+  - hkt: `/var/backups/dn42-network-core/20260719T051038Z-a451f365`
+  - tyo: `/var/backups/dn42-network-core/20260719T051209Z-f8e7c51e`
+  - fra: `/var/backups/dn42-network-core/20260719T051243Z-3dd85148`
+  - lax: `/var/backups/dn42-network-core/20260719T051322Z-3eda7f1d`
+- 部署后每台均为 IPv4 OSPF 3×Full/PtP、IPv6 OSPF 3×Full/PtP、iBGP 3×Established。
+- 控制端外部会话基线保持不变：TYO 9 up；HKT 13 up/1 down；FRA 5 up/2 down/1 degraded；LAX 7 up/2 down。
