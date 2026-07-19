@@ -112,6 +112,7 @@ export const q = {
       updated_at = datetime('now')
     WHERE peerings.source = 'manual'`),
   setStatus: db.prepare("UPDATE peerings SET status = ?, last_error = ?, updated_at = datetime('now') WHERE id = ?"),
+  setNames: db.prepare("UPDATE peerings SET iface = ?, bgp_proto = ?, updated_at = datetime('now') WHERE id = ?"),
   setOperationalState: db.prepare(`UPDATE peerings SET
     operational_state = ?, bgp_state = ?, wg_state = ?,
     last_handshake_at = COALESCE(?, last_handshake_at),

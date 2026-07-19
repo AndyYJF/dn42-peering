@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -68,6 +69,7 @@ if CONF["dry_run"]:
     print("agent: DRY RUN — writing configs under %s, not touching the system" % base)
 
 STATE_FILE = Path(CONF["state_file"])
+MUTATION_LOCK = threading.Lock()
 
 # --- templates ----------------------------------------------------------------
 
@@ -138,7 +140,13 @@ def load_state():
 
 def save_state(state):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    temporary = STATE_FILE.with_name("%s.tmp.%s" % (STATE_FILE.name, os.getpid()))
+    with temporary.open("w") as handle:
+        handle.write(json.dumps(state, indent=2))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, STATE_FILE)
 
 def peer_names(asn, iface=None, proto=None):
     """Resolve explicit, stored, legacy, or new names in that order."""
@@ -310,7 +318,9 @@ def check_endpoint_resolves(endpoint):
     if res.returncode != 0 or not res.stdout.strip():
         raise Invalid("endpoint hostname %r does not resolve" % host)
 
-def check_conflicts(spec, wg_conf, bird_conf):
+def check_conflicts(spec, wg_conf, bird_conf, previous_wg=None, previous_bird=None):
+    previous_wg = set(previous_wg or ())
+    previous_bird = set(previous_bird or ())
     if wg_conf.exists() and not is_ours(wg_conf):
         raise Conflict("interface %s is manually managed on this node" % spec["iface"])
     if bird_conf.exists() and not is_ours(bird_conf):
@@ -320,7 +330,7 @@ def check_conflicts(spec, wg_conf, bird_conf):
     if peer_dir.exists():
         pat = re.compile(r"protocol\s+bgp\s+%s\b" % re.escape(spec["bgp_proto"]))
         for f in peer_dir.glob("*"):
-            if f == bird_conf or not f.is_file():
+            if f == bird_conf or f.resolve() in previous_bird or not f.is_file():
                 continue
             try:
                 if pat.search(f.read_text()):
@@ -329,7 +339,7 @@ def check_conflicts(spec, wg_conf, bird_conf):
                 continue
     # WireGuard listen-port collision with any other config on the node
     for f in Path(CONF["wg_dir"]).glob("*.conf"):
-        if f == wg_conf:
+        if f == wg_conf or f.resolve() in previous_wg:
             continue
         try:
             m = re.search(r"^\s*ListenPort\s*=\s*(\d+)", f.read_text(), re.M)
@@ -378,42 +388,52 @@ def bird_reconfigure(check=True):
 
 def apply_peer(spec):
     spec = validate_spec(spec)
+    previous_iface, previous_proto = peer_names(spec["asn"])
     iface = spec["iface"]
     wg_conf = safe_conf_path(CONF["wg_dir"], "%s.conf" % iface)
     bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % spec["bgp_proto"])
+    previous_wg = safe_conf_path(CONF["wg_dir"], "%s.conf" % previous_iface)
+    previous_bird = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % previous_proto)
     wg_conf.parent.mkdir(parents=True, exist_ok=True)
     bird_conf.parent.mkdir(parents=True, exist_ok=True)
 
-    check_conflicts(spec, wg_conf, bird_conf)
+    check_conflicts(spec, wg_conf, bird_conf, {previous_wg}, {previous_bird})
+    for path, kind in ((previous_wg, "WireGuard"), (previous_bird, "BIRD")):
+        if path.exists() and not is_ours(path):
+            raise Conflict("refusing to migrate unmanaged %s config: %s" % (kind, path))
     check_endpoint_resolves(spec.get("peer_endpoint"))
 
     # both files (if present) are ours per check_conflicts — snapshot for rollback
-    old_wg = wg_conf.read_text() if wg_conf.exists() else None
-    old_bird = bird_conf.read_text() if bird_conf.exists() else None
-
-    if old_wg is not None:
-        run(["wg-quick", "down", str(wg_conf)], check=False)
-    wg_conf.write_text(render_wg(spec))
-    os.chmod(wg_conf, 0o600)
-    bird_conf.write_text(render_bird(spec))
+    paths = {previous_wg, previous_bird, wg_conf, bird_conf}
+    snapshots = {path: path.read_text() if path.exists() else None for path in paths}
     try:
+        if snapshots[previous_wg] is not None:
+            run(["wg-quick", "down", str(previous_wg)], check=False)
+        if wg_conf != previous_wg and snapshots[wg_conf] is not None:
+            run(["wg-quick", "down", str(wg_conf)], check=False)
+        for path in paths:
+            path.unlink(missing_ok=True)
+        wg_conf.write_text(render_wg(spec))
+        os.chmod(wg_conf, 0o600)
+        bird_conf.write_text(render_bird(spec))
         run(["wg-quick", "up", str(wg_conf)])
         bird_reconfigure()
+        state = load_state()
+        state[str(spec["asn"])] = {k: v for k, v in spec.items() if k != "private_key"}
+        save_state(state)
     except Exception:
         run(["wg-quick", "down", str(wg_conf)], check=False)
-        for path, old in ((wg_conf, old_wg), (bird_conf, old_bird)):
+        for path, old in snapshots.items():
             if old is None:
                 path.unlink(missing_ok=True)
             else:
                 path.write_text(old)
-        if old_wg is not None:
-            run(["wg-quick", "up", str(wg_conf)], check=False)
+                if path.parent == Path(CONF["wg_dir"]).resolve():
+                    os.chmod(path, 0o600)
+        if snapshots[previous_wg] is not None:
+            run(["wg-quick", "up", str(previous_wg)], check=False)
         bird_reconfigure(check=False)
         raise
-
-    state = load_state()
-    state[str(spec["asn"])] = {k: v for k, v in spec.items() if k != "private_key"}
-    save_state(state)
 
 def remove_peer(asn):
     iface, proto = peer_names(asn)
@@ -743,10 +763,12 @@ class Handler(BaseHTTPRequestHandler):
                     for field in ("wg_port", "peer_pubkey", "peer_ll", "our_ll"):
                         if not spec.get(field):
                             return self._send(400, {"error": "missing field: %s" % field})
-                    apply_peer(spec)
+                    with MUTATION_LOCK:
+                        apply_peer(spec)
                     return self._send(200, {"ok": True, "iface": spec["iface"], "proto": spec["bgp_proto"]})
                 if self.command == "DELETE" and len(parts) == 2:
-                    remove_peer(asn)
+                    with MUTATION_LOCK:
+                        remove_peer(asn)
                     return self._send(200, {"ok": True})
             return self._send(404, {"error": "not found"})
         except Conflict as e:

@@ -3,10 +3,10 @@ import { timingSafeEqual } from 'node:crypto';
 import { config, nodes, nodeById, publicNode } from '../config.js';
 import { q, logEvent, recordOperationalState } from '../db.js';
 import { toApi, deploy } from './peerings.js';
-import { agentHealth, discoverPeers, peerStatus, safeRemove } from '../agents.js';
-import { isEndpoint, isLinkLocal, isValidAsn, isWgKey } from '../util.js';
+import { agentHealth, deployPeer, discoverPeers, peerStatus, safeRemove } from '../agents.js';
+import { ifaceName, isEndpoint, isLinkLocal, isValidAsn, isWgKey, protoName } from '../util.js';
 import { operationalFailure, operationalSnapshot } from '../operational.js';
-import { deletePeeringTransaction } from '../lifecycle.js';
+import { deletePeeringTransaction, migratePeeringNames } from '../lifecycle.js';
 
 export const adminRouter = Router();
 
@@ -32,7 +32,9 @@ adminRouter.get('/peerings', (req, res) => {
 });
 
 adminRouter.get('/peerings/live', async (req, res) => {
-  const rows = q.allPeerings.all();
+  const nodeFilter = req.query.node;
+  if (nodeFilter && !nodeById(nodeFilter)) return res.status(404).json({ error: 'node not found' });
+  const rows = q.allPeerings.all().filter((p) => !nodeFilter || p.node_id === nodeFilter);
   const results = await Promise.all(rows.map(async (p) => {
     const base = { id: p.id, asn: p.asn, nodeId: p.node_id, status: p.status };
     if (p.status !== 'active') {
@@ -87,6 +89,30 @@ adminAction('disable', async (p) => {
   q.markNotProvisioned.run(p.id);
 });
 adminAction('enable', async (p) => deploy(p));
+
+adminRouter.post('/peerings/:id/migrate-names', async (req, res) => {
+  const p = q.peeringById.get(Number(req.params.id));
+  if (!p) return res.status(404).json({ error: 'not found' });
+  if ((p.source || 'auto') !== 'auto') {
+    return res.status(409).json({ error: 'manual sessions are read-only' });
+  }
+  const node = nodeById(p.node_id);
+  if (!node) return res.status(409).json({ error: `unknown node: ${p.node_id}` });
+  try {
+    const result = await migratePeeringNames(p, {
+      iface: ifaceName(p.asn),
+      bgp_proto: protoName(p.asn),
+    }, {
+      deploy: (candidate) => deployPeer(node, candidate),
+      setNames: (...args) => q.setNames.run(...args),
+      clearOperationalState: (id) => q.clearOperationalState.run(id),
+      logEvent,
+    });
+    res.json({ ...result, peering: toApi(q.peeringById.get(p.id)) });
+  } catch (e) {
+    res.status(502).json({ error: e.message, retained: true });
+  }
+});
 
 adminRouter.delete('/peerings/:id', async (req, res) => {
   const p = q.peeringById.get(Number(req.params.id));
