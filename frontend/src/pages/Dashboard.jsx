@@ -44,13 +44,20 @@ function IconButton({ label, tone = '', children, ...props }) {
 }
 
 function Connectivity({ peering, status }) {
-  const bgpOk = status?.bgp?.state === 'Established' || peering.status === 'active';
+  const bgpState = status?.bgpState || status?.bgp?.state || peering.bgpState || 'unknown';
   const wgAge = status?.wireguard?.latest_handshake_age;
-  const wgOk = typeof wgAge === 'number' ? wgAge <= 180 : peering.status === 'active';
+  const wgState = status?.wgState
+    || (typeof wgAge === 'number' ? (wgAge <= 180 ? 'fresh' : 'stale') : null)
+    || peering.wgState
+    || 'unknown';
+  const bgpOk = bgpState === 'Established';
+  const wgOk = wgState === 'fresh';
+  const bgpLabel = bgpState === 'unknown' || bgpState === 'not-provisioned' ? 'UNKNOWN' : bgpOk ? 'OK' : 'DOWN';
+  const wgLabel = wgState === 'unknown' || wgState === 'not-provisioned' ? 'UNKNOWN' : wgOk ? 'OK' : wgState.toUpperCase();
   return (
     <div className="manage-connectivity">
-      <span className={bgpOk ? 'ok' : 'warn'}>BGP {bgpOk ? 'OK' : 'WAIT'}</span>
-      <span className={wgOk ? 'ok' : 'warn'}>WG {wgOk ? 'OK' : 'STALE'}</span>
+      <span className={bgpOk ? 'ok' : 'warn'}>BGP {bgpLabel}</span>
+      <span className={wgOk ? 'ok' : 'warn'}>WG {wgLabel}</span>
     </div>
   );
 }
@@ -155,7 +162,7 @@ function SessionDetail({ peering, status, error, view, onSaved, onCancelEdit }) 
             <div><span>Transfer</span><b>{fmtBytes(status.wireguard?.rx_bytes)} / {fmtBytes(status.wireguard?.tx_bytes)}</b></div>
           </div>
         ) : (
-          <p className="mut small" style={{ margin: 0 }}>{status ? `session is ${status.status} - no live data` : 'Probe this session to load live BGP and WireGuard status.'}</p>
+          <p className="mut small" style={{ margin: 0 }}>{status ? `session is ${status.provisionState || status.status} - no live data` : 'Probe this session to load live BGP and WireGuard status.'}</p>
         )}
       </section>
       <section className="manage-detail-card">
@@ -288,7 +295,7 @@ export function Dashboard({ auth }) {
   const filteredPeerings = peerings?.filter((p) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    return [p.nodeId, p.node?.name, p.peerLl, p.peerV4, p.peerV6, p.wgEndpoint, p.status]
+    return [p.nodeId, p.node?.name, p.peerLl, p.peerV4, p.peerV6, p.wgEndpoint, p.status, p.operationalState, p.bgpState, p.wgState]
       .filter(Boolean)
       .some((v) => String(v).toLowerCase().includes(q));
   });
@@ -323,7 +330,7 @@ export function Dashboard({ auth }) {
           </div>
           <div className="manage-summary">
             <span>{peerings?.length ?? 0}<small>Total</small></span>
-            <span>{peerings?.filter((p) => p.status === 'active').length ?? 0}<small>Active</small></span>
+            <span>{peerings?.filter((p) => p.status === 'active').length ?? 0}<small>Provisioned</small></span>
           </div>
         </div>
 

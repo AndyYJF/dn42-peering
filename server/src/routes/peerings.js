@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { config, nodeById, publicNode } from '../config.js';
-import { db, q, logEvent } from '../db.js';
+import { db, q, logEvent, recordOperationalState } from '../db.js';
 import { requireAuth } from './auth.js';
 import { deployPeer, peerStatus, safeRemove } from '../agents.js';
 import { isWgKey, isLinkLocal, isDn42V4, isDn42V6, isEndpoint, ifaceName, assignPort } from '../util.js';
+import { operationalFailure, operationalSnapshot } from '../operational.js';
 
 export const peeringsRouter = Router();
 peeringsRouter.use(requireAuth);
@@ -24,7 +25,12 @@ export function ourSide(p) {
 }
 
 const toApi = (p) => ({
-  id: p.id, asn: p.asn, mntner: p.mntner, nodeId: p.node_id, status: p.status,
+  id: p.id, asn: p.asn, mntner: p.mntner, nodeId: p.node_id,
+  status: p.status, provisionState: p.status,
+  operationalState: p.operational_state || (p.status === 'active' ? 'unknown' : 'not-provisioned'),
+  bgpState: p.bgp_state || 'unknown', wgState: p.wg_state || 'unknown',
+  lastHandshakeAt: p.last_handshake_at, lastEstablishedAt: p.last_established_at,
+  operationalError: p.operational_error, lastCheckedAt: p.last_checked_at,
   wgPubkey: p.wg_pubkey, wgEndpoint: p.wg_endpoint, peerLl: p.peer_ll,
   peerV4: p.peer_v4, peerV6: p.peer_v6, mpBgp: !!p.mp_bgp, enh: !!p.enh,
   wgPort: p.wg_port, source: p.source || 'auto', iface: p.iface || ifaceName(p.asn), bgpProto: p.bgp_proto || null,
@@ -52,6 +58,7 @@ async function deploy(peering) {
   // next free candidate.
   const tried = new Set();
   let attempt = peering;
+  q.clearOperationalState.run(peering.id);
   try {
     for (let i = 0; ; i++) {
       try {
@@ -163,12 +170,24 @@ peeringsRouter.delete('/:id', async (req, res) => {
 peeringsRouter.get('/:id/status', async (req, res) => {
   const p = ownPeering(req, res);
   if (!p) return;
-  if (p.status !== 'active') return res.json({ status: p.status, lastError: p.last_error });
+  if (p.status !== 'active') {
+    return res.json({
+      status: p.status,
+      provisionState: p.status,
+      operationalState: 'not-provisioned',
+      bgpState: 'not-provisioned',
+      wgState: 'not-provisioned',
+      lastError: p.last_error,
+    });
+  }
   try {
-    const live = await peerStatus(nodeById(p.node_id), p);
-    res.json({ status: 'active', ...live });
+    const live = operationalSnapshot(await peerStatus(nodeById(p.node_id), p));
+    recordOperationalState(p.id, live);
+    res.json({ status: p.status, provisionState: p.status, ...live });
   } catch (e) {
-    res.status(502).json({ error: `agent unreachable: ${e.message}` });
+    const live = operationalFailure(e.message);
+    recordOperationalState(p.id, live);
+    res.json({ status: p.status, provisionState: p.status, ...live });
   }
 });
 

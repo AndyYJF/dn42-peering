@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { config, nodes, nodeById, publicNode } from '../config.js';
-import { q, logEvent } from '../db.js';
+import { q, logEvent, recordOperationalState } from '../db.js';
 import { toApi, deploy } from './peerings.js';
 import { agentHealth, discoverPeers, peerStatus, safeRemove } from '../agents.js';
 import { isEndpoint, isLinkLocal, isValidAsn, isWgKey } from '../util.js';
+import { operationalFailure, operationalSnapshot } from '../operational.js';
 
 export const adminRouter = Router();
 
@@ -29,45 +30,6 @@ adminRouter.get('/peerings', (req, res) => {
   res.json(q.allPeerings.all().map(toApi));
 });
 
-function liveStateFrom(status) {
-  const bgp = status?.bgp || null;
-  const wg = status?.wireguard || null;
-  const bgpUp = typeof bgp?.ok === 'boolean' ? bgp.ok : bgp?.state === 'Established';
-  const wgUp = typeof wg?.ok === 'boolean'
-    ? wg.ok
-    : typeof wg?.handshake_recent === 'boolean'
-      ? wg.handshake_recent
-      : typeof wg?.latest_handshake_age === 'number' && wg.latest_handshake_age <= 180;
-  const issues = [];
-  if (!bgp) {
-    issues.push({ code: 'bgp.no-data', message: 'BGP status is missing' });
-  } else {
-    if (bgp.error) issues.push({ code: 'bgp.error', message: bgp.error });
-    if (!bgpUp) issues.push({ code: 'bgp.down', message: `BGP is ${bgp.state || 'unknown'}` });
-  }
-  if (!wg) {
-    issues.push({ code: 'wg.no-data', message: 'WireGuard status is missing' });
-  } else {
-    if (wg.error) issues.push({ code: 'wg.error', message: wg.error });
-    if (!wgUp) {
-      const age = wg.latest_handshake_age;
-      const detail = age == null ? 'no handshake seen' : `last handshake ${age}s ago`;
-      issues.push({ code: 'wg.stale', message: `WireGuard is stale: ${detail}` });
-    }
-  }
-  return {
-    ok: issues.length === 0,
-    severity: issues.length ? 'critical' : 'ok',
-    summary: issues.length ? issues.map((i) => i.message).join('; ') : 'BGP established and WireGuard handshake is fresh',
-    issues,
-    bgpUp,
-    wgUp,
-    bgp,
-    wireguard: wg,
-    checkedAt: new Date().toISOString(),
-  };
-}
-
 adminRouter.get('/peerings/live', async (req, res) => {
   const rows = q.allPeerings.all();
   const results = await Promise.all(rows.map(async (p) => {
@@ -87,22 +49,13 @@ adminRouter.get('/peerings/live', async (req, res) => {
       };
     }
     try {
-      const live = liveStateFrom(await peerStatus(nodeById(p.node_id), p));
+      const live = operationalSnapshot(await peerStatus(nodeById(p.node_id), p));
+      recordOperationalState(p.id, live);
       return { ...base, live };
     } catch (e) {
-      return {
-        ...base,
-        live: {
-          ok: false,
-          severity: 'critical',
-          summary: `agent unreachable: ${e.message}`,
-          issues: [{ code: 'agent.unreachable', message: e.message }],
-          bgpUp: false,
-          wgUp: false,
-          error: e.message,
-          checkedAt: new Date().toISOString(),
-        },
-      };
+      const live = operationalFailure(e.message);
+      recordOperationalState(p.id, live);
+      return { ...base, live };
     }
   }));
   res.json(results);
@@ -130,6 +83,7 @@ adminAction('redeploy', async (p) => deploy(p));
 adminAction('disable', async (p) => {
   await safeRemove(p.node_id, p.asn);
   q.setStatus.run('disabled', null, p.id);
+  q.markNotProvisioned.run(p.id);
 });
 adminAction('enable', async (p) => deploy(p));
 

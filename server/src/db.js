@@ -64,6 +64,13 @@ try { db.exec('ALTER TABLE challenges ADD COLUMN attempts INTEGER NOT NULL DEFAU
 try { db.exec("ALTER TABLE peerings ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'"); } catch { /* already there */ }
 try { db.exec('ALTER TABLE peerings ADD COLUMN iface TEXT'); } catch { /* already there */ }
 try { db.exec('ALTER TABLE peerings ADD COLUMN bgp_proto TEXT'); } catch { /* already there */ }
+try { db.exec("ALTER TABLE peerings ADD COLUMN operational_state TEXT NOT NULL DEFAULT 'unknown'"); } catch { /* already there */ }
+try { db.exec("ALTER TABLE peerings ADD COLUMN bgp_state TEXT NOT NULL DEFAULT 'unknown'"); } catch { /* already there */ }
+try { db.exec("ALTER TABLE peerings ADD COLUMN wg_state TEXT NOT NULL DEFAULT 'unknown'"); } catch { /* already there */ }
+try { db.exec('ALTER TABLE peerings ADD COLUMN last_handshake_at INTEGER'); } catch { /* already there */ }
+try { db.exec('ALTER TABLE peerings ADD COLUMN last_established_at TEXT'); } catch { /* already there */ }
+try { db.exec('ALTER TABLE peerings ADD COLUMN operational_error TEXT'); } catch { /* already there */ }
+try { db.exec('ALTER TABLE peerings ADD COLUMN last_checked_at TEXT'); } catch { /* already there */ }
 
 export const q = {
   peeringsByAsn: db.prepare('SELECT * FROM peerings WHERE asn = ? ORDER BY created_at'),
@@ -98,6 +105,18 @@ export const q = {
       updated_at = datetime('now')
     WHERE peerings.source = 'manual'`),
   setStatus: db.prepare("UPDATE peerings SET status = ?, last_error = ?, updated_at = datetime('now') WHERE id = ?"),
+  setOperationalState: db.prepare(`UPDATE peerings SET
+    operational_state = ?, bgp_state = ?, wg_state = ?,
+    last_handshake_at = COALESCE(?, last_handshake_at),
+    last_established_at = COALESCE(?, last_established_at),
+    operational_error = ?, last_checked_at = ?
+    WHERE id = ?`),
+  clearOperationalState: db.prepare(`UPDATE peerings SET
+    operational_state = 'unknown', bgp_state = 'unknown', wg_state = 'unknown',
+    operational_error = NULL, last_checked_at = NULL WHERE id = ?`),
+  markNotProvisioned: db.prepare(`UPDATE peerings SET
+    operational_state = 'not-provisioned', bgp_state = 'not-provisioned', wg_state = 'not-provisioned',
+    operational_error = NULL, last_checked_at = datetime('now') WHERE id = ?`),
   deletePeering: db.prepare('DELETE FROM peerings WHERE id = ?'),
   insertChallenge: db.prepare('INSERT INTO challenges (id, asn, mntner, method, key_data, challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   getChallenge: db.prepare('SELECT * FROM challenges WHERE id = ?'),
@@ -109,3 +128,16 @@ export const q = {
   emailCodesForRecipientWindow: db.prepare("SELECT COUNT(*) AS n FROM challenges WHERE key_data = ? AND method = 'email' AND expires_at > ?"),
   recentEvents: db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?'),
 };
+
+export function recordOperationalState(id, live) {
+  q.setOperationalState.run(
+    live.operationalState,
+    live.bgpState,
+    live.wgState,
+    live.lastHandshakeAt,
+    live.lastEstablishedAt,
+    live.ok ? null : live.summary,
+    live.checkedAt,
+    id,
+  );
+}
