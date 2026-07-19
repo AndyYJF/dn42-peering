@@ -63,7 +63,8 @@ cd deploy/.work && node deploy-server.js   # 幂等
 
 ## Git 管理的 OSPF/iBGP 核心部署（2026-07-19）
 
-- `network/inventory.json` 已成为四节点 OSPF 成本、接口和 iBGP Full Mesh 的配置源。
+- 四节点 OSPF 成本、接口和 iBGP Full Mesh 的配置源已迁移到独立仓库
+  [`AndyYJF/dn42-network-config`](https://github.com/AndyYJF/dn42-network-config)；本仓库不再保存配置副本。
 - `/etc/bird/peers/*` 仍归 Auto Peer Agent / 手工 Peer 所有，核心部署器不会读取、删除或覆盖该目录。
 - 所有节点生成配置都先在 `/tmp` 的完整 BIRD 副本中通过各自版本的 `bird -p`。
 - HKT 第一次金丝雀因生成目录权限不是 0755 被 BIRD 拒绝，部署器成功自动恢复；修复目录权限归一化后重试通过。
