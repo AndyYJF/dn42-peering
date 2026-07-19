@@ -290,7 +290,7 @@ function PeeringsTable({ token, onError }) {
                   {busyId === p.id ? <Spinner /> : (
                     <span style={{ display: 'inline-flex', gap: 6 }}>
                       {p.status === 'pending' && <button className="btn sm solid" onClick={() => act(p.id, 'approve')}>Approve</button>}
-                      {p.source !== 'manual' && (p.status === 'active' || p.status === 'error') && <button className="btn sm" onClick={() => act(p.id, 'redeploy')}>Redeploy</button>}
+                      {p.source !== 'manual' && ['active', 'error', 'delete_failed'].includes(p.status) && <button className="btn sm" onClick={() => act(p.id, 'redeploy')}>Redeploy</button>}
                       {p.source !== 'manual' && p.status === 'active' && <button className="btn sm ghost" onClick={() => act(p.id, 'disable')}>Disable</button>}
                       {p.source !== 'manual' && p.status === 'disabled' && <button className="btn sm" onClick={() => act(p.id, 'enable')}>Enable</button>}
                       <button className="btn sm danger" onClick={() => act(p.id, 'delete')}>{p.source === 'manual' ? 'Forget' : 'Del'}</button>

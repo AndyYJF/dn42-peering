@@ -395,15 +395,36 @@ def remove_peer(asn):
     iface = iface_name(asn)
     wg_conf = Path(CONF["wg_dir"]) / ("%s.conf" % iface)
     bird_conf = Path(CONF["bird_peer_dir"]) / ("%s.conf" % proto_name(asn))
-    if wg_conf.exists() and is_ours(wg_conf):
-        run(["wg-quick", "down", str(wg_conf)], check=False)
-        wg_conf.unlink()
-    if bird_conf.exists() and is_ours(bird_conf):
-        bird_conf.unlink()
-    bird_reconfigure(check=False)
     state = load_state()
-    state.pop(str(asn), None)
-    save_state(state)
+    old_wg = wg_conf.read_text() if wg_conf.exists() and is_ours(wg_conf) else None
+    old_bird = bird_conf.read_text() if bird_conf.exists() and is_ours(bird_conf) else None
+
+    # A name collision must never cause the agent to report success while
+    # leaving a manually-managed file behind.
+    if wg_conf.exists() and old_wg is None:
+        raise Conflict("refusing to remove unmanaged WireGuard config: %s" % wg_conf)
+    if bird_conf.exists() and old_bird is None:
+        raise Conflict("refusing to remove unmanaged BIRD config: %s" % bird_conf)
+
+    try:
+        if old_wg is not None:
+            run(["wg-quick", "down", str(wg_conf)], check=False)
+            wg_conf.unlink()
+        if old_bird is not None:
+            bird_conf.unlink()
+        bird_reconfigure()
+        state.pop(str(asn), None)
+        save_state(state)
+    except Exception:
+        if old_wg is not None:
+            wg_conf.write_text(old_wg)
+            os.chmod(wg_conf, 0o600)
+        if old_bird is not None:
+            bird_conf.write_text(old_bird)
+        if old_wg is not None:
+            run(["wg-quick", "up", str(wg_conf)], check=False)
+        bird_reconfigure(check=False)
+        raise
 
 # --- discovery ------------------------------------------------------------------
 

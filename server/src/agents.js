@@ -60,8 +60,8 @@ export const discoverPeers = (node) => call(node, 'GET', '/discover');
 
 export async function safeRemove(nodeId, asn) {
   const node = nodeById(nodeId);
-  if (!node) return;
-  try { await removePeer(node, asn); } catch (e) { console.warn(`[agent] remove AS${asn}@${nodeId}: ${e.message}`); }
+  if (!node) throw new Error(`unknown node: ${nodeId}`);
+  return removePeer(node, asn);
 }
 
 // --- demo simulation -------------------------------------------------------

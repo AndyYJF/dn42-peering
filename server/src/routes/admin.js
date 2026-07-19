@@ -6,6 +6,7 @@ import { toApi, deploy } from './peerings.js';
 import { agentHealth, discoverPeers, peerStatus, safeRemove } from '../agents.js';
 import { isEndpoint, isLinkLocal, isValidAsn, isWgKey } from '../util.js';
 import { operationalFailure, operationalSnapshot } from '../operational.js';
+import { deletePeeringTransaction } from '../lifecycle.js';
 
 export const adminRouter = Router();
 
@@ -90,10 +91,22 @@ adminAction('enable', async (p) => deploy(p));
 adminRouter.delete('/peerings/:id', async (req, res) => {
   const p = q.peeringById.get(Number(req.params.id));
   if (!p) return res.status(404).json({ error: 'not found' });
-  if ((p.source || 'auto') !== 'manual') await safeRemove(p.node_id, p.asn);
-  q.deletePeering.run(p.id);
-  logEvent(p.asn, (p.source || 'auto') === 'manual' ? 'admin.forget-manual' : 'admin.delete', p.node_id);
-  res.json({ ok: true });
+  if ((p.source || 'auto') === 'manual') {
+    q.deletePeering.run(p.id);
+    logEvent(p.asn, 'admin.forget-manual', p.node_id);
+    return res.json({ ok: true });
+  }
+  try {
+    await deletePeeringTransaction(p, {
+      remove: safeRemove,
+      setStatus: (...args) => q.setStatus.run(...args),
+      deleteRecord: (id) => q.deletePeering.run(id),
+      logEvent,
+    }, 'admin.delete');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message, status: 'delete_failed', retained: true });
+  }
 });
 
 function validDiscoveredPeer(peer) {

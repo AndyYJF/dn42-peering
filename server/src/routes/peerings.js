@@ -5,6 +5,7 @@ import { requireAuth } from './auth.js';
 import { deployPeer, peerStatus, safeRemove } from '../agents.js';
 import { isWgKey, isLinkLocal, isDn42V4, isDn42V6, isEndpoint, ifaceName, assignPort } from '../util.js';
 import { operationalFailure, operationalSnapshot } from '../operational.js';
+import { deletePeeringTransaction } from '../lifecycle.js';
 
 export const peeringsRouter = Router();
 peeringsRouter.use(requireAuth);
@@ -150,7 +151,7 @@ peeringsRouter.patch('/:id', async (req, res) => {
   );
   logEvent(p.asn, 'peering.update', p.node_id);
   let updated = q.peeringById.get(p.id);
-  if (p.status === 'active' || p.status === 'error') {
+  if (['active', 'error', 'delete_failed'].includes(p.status)) {
     await deploy(updated);
     updated = q.peeringById.get(p.id);
   }
@@ -161,10 +162,17 @@ peeringsRouter.delete('/:id', async (req, res) => {
   const p = ownPeering(req, res);
   if (!p) return;
   if ((p.source || 'auto') === 'manual') return res.status(409).json({ error: 'manual sessions are read-only; ask an operator to forget or change them' });
-  await safeRemove(p.node_id, p.asn);
-  q.deletePeering.run(p.id);
-  logEvent(p.asn, 'peering.delete', p.node_id);
-  res.json({ ok: true });
+  try {
+    await deletePeeringTransaction(p, {
+      remove: safeRemove,
+      setStatus: (...args) => q.setStatus.run(...args),
+      deleteRecord: (id) => q.deletePeering.run(id),
+      logEvent,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message, status: 'delete_failed', retained: true });
+  }
 });
 
 peeringsRouter.get('/:id/status', async (req, res) => {
