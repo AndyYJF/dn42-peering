@@ -22,6 +22,7 @@ DN42 自助 peering 系统（全栈）。外部 AS 在网页上验证身份 → 
 | `server/` | Node ≥22.5 + Express + `node:sqlite` | 控制面：DN42 registry 身份验证（SSH/PGP 挑战签名）、会话管理、向 agent 下发 |
 | `agent/` | Python 3 纯标准库（单文件） | 跑在每个节点：渲染并应用 wg-quick + BIRD2 配置、回报 BGP/WG 状态 |
 | `config/` | JSON | 站点配置与 4 个节点定义 |
+| `network/` | JSON + Python | Git 管理的四节点 OSPF/iBGP Full Mesh 清单、渲染与只读审计 |
 
 ## 身份验证原理
 
@@ -84,7 +85,7 @@ agent 前提：
 
 ### 命名与端口约定
 
-- WireGuard 接口 / BIRD protocol：`dn42-XXXX` / `dn42_XXXX`（XXXX = 对方 ASN 后 4 位）
+- WireGuard 接口 / BIRD protocol：`dn42-<完整ASN>` / `dn42_<完整ASN>`；例如 `dn42-4242422229` / `dn42_4242422229`
 - 本侧监听端口：`2XXXX`（冲突时自动从 21000-29999 顺延）
 
 ## API 速览

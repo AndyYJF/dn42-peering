@@ -32,8 +32,8 @@ config.json(jwtSecret/adminToken)与各节点 agent token 都在 hkt `/opt/dn42-
 
 ## 生成的配置风格(与现网手工 peer 一致)
 
-- wg: `/etc/wireguard/dn42-XXXX.conf`,`Address = fe80::2921/64` + `autoconf=0` + `Table=off`
-- bird: `/etc/bird/peers/dn42_XXXX.conf`,`protocol bgp dn42_XXXX from dnpeers { ... }`,ENH 可选
+- wg: `/etc/wireguard/dn42-<完整ASN>.conf`,`Address = fe80::2921/64` + `autoconf=0` + `Table=off`
+- bird: `/etc/bird/peers/dn42_<完整ASN>.conf`,`protocol bgp dn42_<完整ASN> from dnpeers { ... }`,ENH 可选
 - 端口 `2XXXX`(被占自动顺延);文件头部有 `managed by dn42-peering agent` 标记,**agent 只会动带标记的文件**,不会碰手工 peer;bird 配置被拒绝时自动回滚
 
 ## E2E 验证结论(2026-06-10)
