@@ -43,9 +43,9 @@ for (const peering of candidates) {
 }
 
 let pending = [...expectedUp];
-// A remote BIRD may keep the previous TCP/GR state for up to two minutes.
-// Allow one full hold/retry window before declaring the rolling batch failed.
-const deadline = Date.now() + 180000;
+// A remote BIRD may keep the previous TCP/GR state for a 240-second hold time.
+// Allow that full window plus retry slack before declaring the batch failed.
+const deadline = Date.now() + 300000;
 while (pending.length && Date.now() < deadline) {
   const live = await admin(`/peerings/live?node=${encodeURIComponent(nodeId)}`);
   pending = pending.filter((id) => live.find((item) => item.id === id)?.live?.operationalState !== 'up');
@@ -53,6 +53,6 @@ while (pending.length && Date.now() < deadline) {
 }
 
 if (pending.length) {
-  throw new Error(`previously-up sessions did not recover within 180s: ${pending.join(', ')}`);
+  throw new Error(`previously-up sessions did not recover within 300s: ${pending.join(', ')}`);
 }
 console.log(JSON.stringify({ nodeId, migrated: candidates.length, verification: 'ok' }));
