@@ -668,6 +668,267 @@ table.grid th {
 table.grid td { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 table.grid tr:hover td { background: var(--hover-row); }
 
+/* ---------- admin live monitor ---------- */
+
+.admin-sessions-panel {
+  overflow: hidden;
+}
+
+.admin-sessions-panel .panel-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.live-overview {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.status-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.status-metric {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.status-metric .k,
+.chart-title {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.status-metric .v {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--fd);
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.05;
+  color: var(--txt);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-metric .s {
+  display: block;
+  min-height: 18px;
+  margin-top: 3px;
+  color: var(--mut);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-metric.grn .v { color: var(--grn); }
+.status-metric.amber .v { color: var(--amber); }
+.status-metric.red .v { color: var(--red); }
+
+.mini-meter {
+  height: 3px;
+  margin-top: 10px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.mini-meter span {
+  display: block;
+  height: 100%;
+  background: var(--grn);
+}
+
+.mini-meter span.on { min-width: 2px; }
+
+.mini-meter.amber span { background: var(--amber); }
+.mini-meter.red span { background: var(--red); }
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.chart-block {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.12);
+  padding: 12px;
+}
+
+.bar-chart {
+  display: grid;
+  gap: 9px;
+  margin-top: 11px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(76px, 0.7fr) minmax(120px, 1fr) 34px;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.bar-label,
+.bar-value {
+  font-size: 10px;
+  color: var(--mut);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-value {
+  color: var(--txt);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-track {
+  height: 8px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.bar-track span {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  background: var(--amber);
+  box-shadow: 0 0 14px var(--amber-glow);
+}
+
+.bar-track.grn span {
+  background: var(--grn);
+  box-shadow: 0 0 14px var(--grn-glow);
+}
+
+.bar-track.red span {
+  background: var(--red);
+  box-shadow: 0 0 14px var(--red-glow);
+}
+
+.chart-empty {
+  margin-top: 11px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.admin-sessions-panel table.grid,
+.admin-sessions-panel table.grid tbody,
+.admin-sessions-panel table.grid tr,
+.admin-sessions-panel table.grid td {
+  display: block;
+}
+
+.admin-sessions-panel table.grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.admin-sessions-panel table.grid thead {
+  display: none;
+}
+
+.admin-sessions-panel table.grid tbody {
+  display: grid;
+}
+
+.admin-sessions-panel table.grid tr {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 0.85fr)
+    minmax(150px, 1fr)
+    minmax(58px, 0.35fr)
+    minmax(86px, 0.45fr)
+    minmax(70px, 0.35fr)
+    minmax(132px, 0.75fr)
+    minmax(170px, 0.95fr)
+    minmax(190px, 1.25fr)
+    minmax(122px, 0.65fr);
+  grid-template-areas:
+    "asn maint node source port status bgp wg actions"
+    "asn maint routes routes transfer transfer endpoint endpoint actions"
+    "asn maint created created created created endpoint endpoint actions";
+  gap: 10px 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.admin-sessions-panel table.grid tr:hover {
+  background: var(--hover-row);
+}
+
+.admin-sessions-panel table.grid tr:hover td {
+  background: transparent;
+}
+
+.admin-sessions-panel table.grid td {
+  min-width: 0;
+  padding: 0;
+  border-bottom: none;
+  overflow-wrap: anywhere;
+}
+
+.admin-sessions-panel table.grid td:nth-child(1) { grid-area: asn; }
+.admin-sessions-panel table.grid td:nth-child(2) { grid-area: maint; }
+.admin-sessions-panel table.grid td:nth-child(3) { grid-area: node; }
+.admin-sessions-panel table.grid td:nth-child(4) { grid-area: source; }
+.admin-sessions-panel table.grid td:nth-child(5) { grid-area: port; }
+.admin-sessions-panel table.grid td:nth-child(6) { grid-area: status; }
+.admin-sessions-panel table.grid td:nth-child(7) { grid-area: bgp; }
+.admin-sessions-panel table.grid td:nth-child(8) { grid-area: wg; }
+.admin-sessions-panel table.grid td:nth-child(9) { grid-area: routes; }
+.admin-sessions-panel table.grid td:nth-child(10) { grid-area: transfer; }
+.admin-sessions-panel table.grid td:nth-child(11) { grid-area: endpoint; }
+.admin-sessions-panel table.grid td:nth-child(12) { grid-area: created; }
+.admin-sessions-panel table.grid td:nth-child(13) { grid-area: actions; }
+
+.admin-sessions-panel table.grid td:nth-child(9),
+.admin-sessions-panel table.grid td:nth-child(10),
+.admin-sessions-panel table.grid td:nth-child(11),
+.admin-sessions-panel table.grid td:nth-child(12) {
+  color: var(--mut);
+}
+
+.admin-sessions-panel .tag,
+.admin-sessions-panel .chip {
+  max-width: 100%;
+}
+
+.admin-sessions-panel td:nth-child(8) .tag {
+  white-space: normal;
+  line-height: 1.45;
+  align-items: flex-start;
+}
+
+.admin-sessions-panel td:nth-child(13) > span {
+  display: flex !important;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.admin-sessions-panel td[colspan] {
+  grid-column: 1 / -1;
+  padding: 18px;
+}
+
 /* ---------- footer ---------- */
 
 .footer { border-top: 1px solid var(--line-soft); margin-top: 80px; padding: 44px 0 60px; }
@@ -707,6 +968,41 @@ table.grid tr:hover td { background: var(--hover-row); }
   .stepper { flex-wrap: wrap; }
   .stepper .st { min-width: 45%; }
   .nav { display: none; }
+  .status-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-sessions-panel table.grid tr {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "asn"
+      "maint"
+      "node"
+      "source"
+      "port"
+      "status"
+      "bgp"
+      "wg"
+      "routes"
+      "transfer"
+      "endpoint"
+      "created"
+      "actions";
+  }
+  .admin-sessions-panel td:nth-child(13) > span {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .status-metrics {
+    grid-template-columns: 1fr;
+  }
+  .bar-row {
+    grid-template-columns: minmax(70px, 0.7fr) minmax(80px, 1fr) 30px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

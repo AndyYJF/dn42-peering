@@ -1,5 +1,5 @@
 import { config, nodeById } from './config.js';
-import { ifaceName } from './util.js';
+import { ifaceName, protoName } from './util.js';
 
 /**
  * Client for the per-node provisioning agents (agent/agent.py).
@@ -28,7 +28,8 @@ async function call(node, method, p, body) {
 export function peerPayload(node, p) {
   return {
     asn: p.asn,
-    iface: ifaceName(p.asn),
+    iface: p.iface || ifaceName(p.asn),
+    bgp_proto: p.bgp_proto || protoName(p.asn),
     wg_port: p.wg_port,
     peer_pubkey: p.wg_pubkey,
     peer_endpoint: p.wg_endpoint || null,
@@ -45,31 +46,84 @@ export function peerPayload(node, p) {
 
 export const deployPeer = (node, peering) => call(node, 'PUT', `/peers/${peering.asn}`, peerPayload(node, peering));
 export const removePeer = (node, asn) => call(node, 'DELETE', `/peers/${asn}`);
-export const peerStatus = (node, asn) => call(node, 'GET', `/peers/${asn}/status`);
+export function peerStatus(node, peeringOrAsn) {
+  const asn = typeof peeringOrAsn === 'object' ? peeringOrAsn.asn : peeringOrAsn;
+  const params = new URLSearchParams();
+  if (typeof peeringOrAsn === 'object') {
+    if (peeringOrAsn.iface) params.set('iface', peeringOrAsn.iface);
+    if (peeringOrAsn.bgp_proto) params.set('proto', peeringOrAsn.bgp_proto);
+  }
+  const qs = params.toString();
+  return call(node, 'GET', `/peers/${asn}/status${qs ? `?${qs}` : ''}`);
+}
 export const agentHealth = (node) => call(node, 'GET', '/health');
+export const discoverPeers = (node) => call(node, 'GET', '/discover');
 
 export async function safeRemove(nodeId, asn) {
   const node = nodeById(nodeId);
-  if (!node) return;
-  try { await removePeer(node, asn); } catch (e) { console.warn(`[agent] remove AS${asn}@${nodeId}: ${e.message}`); }
+  if (!node) throw new Error(`unknown node: ${nodeId}`);
+  return removePeer(node, asn);
 }
 
 // --- demo simulation -------------------------------------------------------
 
 function demoCall(method, p) {
   if (method === 'GET' && p === '/health') {
-    return { ok: true, hostname: 'demo-node', bird: 'BIRD 2.15.1', wireguard: true, dry_run: true };
+    return { ok: true, hostname: 'demo-node', bird: 'BIRD 2.15.1', bird_ok: true, wireguard: true, wg_quick: true, dry_run: true, peers: 3 };
   }
-  if (method === 'GET' && p.endsWith('/status')) {
-    const asn = Number(p.split('/')[2]);
+  if (method === 'GET' && p.includes('/status')) {
+    const [pathOnly, query = ''] = p.split('?');
+    const asn = Number(pathOnly.split('/')[2]);
+    const params = new URLSearchParams(query);
     const seed = asn % 97;
+    const handshakeAge = 12 + (seed % 240);
+    const iface = params.get('iface') || ifaceName(asn);
+    const proto = params.get('proto') || protoName(asn);
     return {
       bgp: {
+        ok: seed % 11 !== 0,
         state: seed % 11 === 0 ? 'Connect' : 'Established',
+        protocol: proto,
+        protocol_state: seed % 11 === 0 ? 'start' : 'up',
         since: '2026-06-09 14:02:11',
+        neighbor_address: 'fe80::1234%dn42-demo',
+        neighbor_as: asn,
+        local_as: config.ourAsn,
         routes: { ipv4_import: 480 + seed, ipv4_export: 512, ipv6_import: 290 + seed, ipv6_export: 301 },
+        channels: {
+          ipv4: { state: 'UP', imported: 480 + seed, exported: 512, preferred: 480 + seed },
+          ipv6: { state: 'UP', imported: 290 + seed, exported: 301, preferred: 290 + seed },
+        },
       },
-      wireguard: { latest_handshake_age: 12 + (seed % 90), rx_bytes: 10485760 + seed * 9973, tx_bytes: 8388608 + seed * 7919, endpoint: '203.0.113.7:51820' },
+      wireguard: {
+        ok: handshakeAge <= 180,
+        interface: iface,
+        latest_handshake_at: Math.floor(Date.now() / 1000) - handshakeAge,
+        latest_handshake_age: handshakeAge,
+        handshake_recent: handshakeAge <= 180,
+        rx_bytes: 10485760 + seed * 9973,
+        tx_bytes: 8388608 + seed * 7919,
+        endpoint: '203.0.113.7:51820',
+      },
+    };
+  }
+  if (method === 'GET' && p === '/discover') {
+    return {
+      peers: [
+        {
+          asn: 4242421235,
+          iface: 'manual-1235',
+          bgp_proto: 'manual_1235',
+          wg_port: 21235,
+          peer_pubkey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+          peer_endpoint: '203.0.113.7:51820',
+          peer_ll: 'fe80::1235',
+          mp_bgp: true,
+          enh: true,
+          source: 'manual',
+          managed: false,
+        },
+      ],
     };
   }
   return { ok: true, demo: true };

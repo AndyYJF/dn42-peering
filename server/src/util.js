@@ -65,7 +65,13 @@ export function isEndpoint(s) {
   return Number.isInteger(n) && n >= 1 && n <= 65535;
 }
 
-export const ifaceName = (asn) => `dn42-${String(asn).slice(-4)}`;
+/** Full ASN names avoid collisions between 424242xxxx and 420127xxxx. */
+export const ifaceName = (asn) => `dn42-${String(asn)}`;
+export const protoName = (asn) => `dn42_${String(asn)}`;
+
+/** Compatibility names used by sessions provisioned before the full-ASN migration. */
+export const legacyIfaceName = (asn) => `dn42-${String(asn).slice(-4)}`;
+export const legacyProtoName = (asn) => `dn42_${String(asn).slice(-4)}`;
 
 /** Preferred dn42 convention: 2xxxx where xxxx = last 4 digits of the peer ASN. */
 export function assignPort(asn, takenPorts) {

@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { config, nodeById, publicNode } from '../config.js';
-import { db, q, logEvent } from '../db.js';
+import { db, q, logEvent, recordOperationalState } from '../db.js';
 import { requireAuth } from './auth.js';
 import { deployPeer, peerStatus, safeRemove } from '../agents.js';
-import { isWgKey, isLinkLocal, isDn42V4, isDn42V6, isEndpoint, ifaceName, assignPort } from '../util.js';
+import { isWgKey, isLinkLocal, isDn42V4, isDn42V6, isEndpoint, ifaceName, protoName, assignPort } from '../util.js';
+import { operationalFailure, operationalSnapshot } from '../operational.js';
+import { deletePeeringTransaction } from '../lifecycle.js';
 
 export const peeringsRouter = Router();
 peeringsRouter.use(requireAuth);
@@ -19,15 +21,21 @@ export function ourSide(p) {
     linkLocal: node.linkLocal,
     tunnelV4: node.tunnelV4 || null,
     dn42V6: node.dn42V6 || null,
-    iface: ifaceName(p.asn),
+    iface: p.iface || ifaceName(p.asn),
   };
 }
 
 const toApi = (p) => ({
-  id: p.id, asn: p.asn, mntner: p.mntner, nodeId: p.node_id, status: p.status,
+  id: p.id, asn: p.asn, mntner: p.mntner, nodeId: p.node_id,
+  status: p.status, provisionState: p.status,
+  operationalState: p.operational_state || (p.status === 'active' ? 'unknown' : 'not-provisioned'),
+  bgpState: p.bgp_state || 'unknown', wgState: p.wg_state || 'unknown',
+  lastHandshakeAt: p.last_handshake_at, lastEstablishedAt: p.last_established_at,
+  operationalError: p.operational_error, lastCheckedAt: p.last_checked_at,
   wgPubkey: p.wg_pubkey, wgEndpoint: p.wg_endpoint, peerLl: p.peer_ll,
   peerV4: p.peer_v4, peerV6: p.peer_v6, mpBgp: !!p.mp_bgp, enh: !!p.enh,
-  wgPort: p.wg_port, lastError: p.last_error, createdAt: p.created_at, updatedAt: p.updated_at,
+  wgPort: p.wg_port, source: p.source || 'auto', iface: p.iface || ifaceName(p.asn), bgpProto: p.bgp_proto || protoName(p.asn),
+  lastError: p.last_error, createdAt: p.created_at, updatedAt: p.updated_at,
   ourSide: ourSide(p), node: nodeById(p.node_id) ? publicNode(nodeById(p.node_id)) : null,
 });
 
@@ -42,12 +50,16 @@ function validateTunnel(body) {
 }
 
 async function deploy(peering) {
+  if ((peering.source || 'auto') === 'manual') {
+    throw new Error('manual sessions are read-only; use the node config to change them');
+  }
   const node = nodeById(peering.node_id);
   // nodes may have manually-managed tunnels whose ports our DB doesn't know
   // about — on a port conflict the agent answers 409 and we retry with the
   // next free candidate.
   const tried = new Set();
   let attempt = peering;
+  q.clearOperationalState.run(peering.id);
   try {
     for (let i = 0; ; i++) {
       try {
@@ -96,6 +108,7 @@ peeringsRouter.post('/', async (req, res) => {
     req.body.wgPubkey.trim(), req.body.wgEndpoint?.trim() || null,
     req.body.peerLl.trim(), req.body.peerV4?.trim() || null, req.body.peerV6?.trim() || null,
     req.body.mpBgp === false ? 0 : 1, req.body.enh === false ? 0 : 1, port,
+    ifaceName(asn), protoName(asn),
   );
   let peering = q.peeringById.get(info.lastInsertRowid);
   logEvent(asn, 'peering.create', `${node.id} port ${port}`);
@@ -119,6 +132,7 @@ function ownPeering(req, res) {
 peeringsRouter.patch('/:id', async (req, res) => {
   const p = ownPeering(req, res);
   if (!p) return;
+  if ((p.source || 'auto') === 'manual') return res.status(409).json({ error: 'manual sessions are read-only; edit the node config and sync again' });
   const merged = {
     wgPubkey: req.body.wgPubkey ?? p.wg_pubkey,
     wgEndpoint: req.body.wgEndpoint !== undefined ? req.body.wgEndpoint : p.wg_endpoint,
@@ -138,7 +152,7 @@ peeringsRouter.patch('/:id', async (req, res) => {
   );
   logEvent(p.asn, 'peering.update', p.node_id);
   let updated = q.peeringById.get(p.id);
-  if (p.status === 'active' || p.status === 'error') {
+  if (['active', 'error', 'delete_failed'].includes(p.status)) {
     await deploy(updated);
     updated = q.peeringById.get(p.id);
   }
@@ -148,21 +162,41 @@ peeringsRouter.patch('/:id', async (req, res) => {
 peeringsRouter.delete('/:id', async (req, res) => {
   const p = ownPeering(req, res);
   if (!p) return;
-  await safeRemove(p.node_id, p.asn);
-  q.deletePeering.run(p.id);
-  logEvent(p.asn, 'peering.delete', p.node_id);
-  res.json({ ok: true });
+  if ((p.source || 'auto') === 'manual') return res.status(409).json({ error: 'manual sessions are read-only; ask an operator to forget or change them' });
+  try {
+    await deletePeeringTransaction(p, {
+      remove: safeRemove,
+      setStatus: (...args) => q.setStatus.run(...args),
+      deleteRecord: (id) => q.deletePeering.run(id),
+      logEvent,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message, status: 'delete_failed', retained: true });
+  }
 });
 
 peeringsRouter.get('/:id/status', async (req, res) => {
   const p = ownPeering(req, res);
   if (!p) return;
-  if (p.status !== 'active') return res.json({ status: p.status, lastError: p.last_error });
+  if (p.status !== 'active') {
+    return res.json({
+      status: p.status,
+      provisionState: p.status,
+      operationalState: 'not-provisioned',
+      bgpState: 'not-provisioned',
+      wgState: 'not-provisioned',
+      lastError: p.last_error,
+    });
+  }
   try {
-    const live = await peerStatus(nodeById(p.node_id), p.asn);
-    res.json({ status: 'active', ...live });
+    const live = operationalSnapshot(await peerStatus(nodeById(p.node_id), p));
+    recordOperationalState(p.id, live);
+    res.json({ status: p.status, provisionState: p.status, ...live });
   } catch (e) {
-    res.status(502).json({ error: `agent unreachable: ${e.message}` });
+    const live = operationalFailure(e.message);
+    recordOperationalState(p.id, live);
+    res.json({ status: p.status, provisionState: p.status, ...live });
   }
 });
 

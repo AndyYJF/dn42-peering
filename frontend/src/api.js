@@ -49,6 +49,8 @@ export const api = {
 
   admin: {
     peerings: (t) => req('/admin/peerings', { admin: t }),
+    livePeerings: (t) => req('/admin/peerings/live', { admin: t }),
+    syncDiscovered: (t) => req('/admin/peerings/sync-discovered', { method: 'POST', admin: t }),
     action: (t, id, action) => req(`/admin/peerings/${id}/${action}`, { method: 'POST', admin: t }),
     remove: (t, id) => req(`/admin/peerings/${id}`, { method: 'DELETE', admin: t }),
     nodesHealth: (t) => req('/admin/nodes/health', { admin: t }),

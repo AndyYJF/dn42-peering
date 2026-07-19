@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node --no-warnings src/index.js",
     "dev": "node --no-warnings --watch src/index.js",
-    "demo": "PEERING_DEMO=1 node --no-warnings src/index.js"
+    "demo": "PEERING_DEMO=1 node --no-warnings src/index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.21.2",

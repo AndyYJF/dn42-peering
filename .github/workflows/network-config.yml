@@ -1,0 +1,27 @@
+name: network-config
+
+on:
+  pull_request:
+    paths:
+      - "network/**"
+      - ".github/workflows/network-config.yml"
+  push:
+    paths:
+      - "network/**"
+      - ".github/workflows/network-config.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate and render the four-node topology
+        run: python3 network/render.py --check
+      - name: Run network configuration tests
+        run: python3 -m unittest discover -s network -p 'test_*.py' -v

@@ -9,6 +9,7 @@ birdc). Set DRY_RUN=1 to test the full API without touching the system.
 API (Bearer token):
   GET    /health               -> agent + bird + wg sanity
   GET    /peers                -> list of provisioned peers
+  GET    /discover             -> discover managed + manual BGP/WG peers
   PUT    /peers/<asn>          -> create/replace a peer (body: see PeerSpec)
   DELETE /peers/<asn>          -> tear down a peer
   GET    /peers/<asn>/status   -> live BGP + WireGuard state
@@ -22,8 +23,11 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 # --- configuration -----------------------------------------------------------
 
@@ -65,6 +69,7 @@ if CONF["dry_run"]:
     print("agent: DRY RUN — writing configs under %s, not touching the system" % base)
 
 STATE_FILE = Path(CONF["state_file"])
+MUTATION_LOCK = threading.Lock()
 
 # --- templates ----------------------------------------------------------------
 
@@ -117,9 +122,15 @@ def run_always(cmd, timeout=10):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 def proto_name(asn):
-    return "dn42_%s" % str(asn)[-4:]
+    return "dn42_%s" % str(asn)
 
 def iface_name(asn):
+    return CONF["iface_prefix"] + str(asn)
+
+def legacy_proto_name(asn):
+    return "dn42_%s" % str(asn)[-4:]
+
+def legacy_iface_name(asn):
     return CONF["iface_prefix"] + str(asn)[-4:]
 
 def load_state():
@@ -129,7 +140,29 @@ def load_state():
 
 def save_state(state):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    temporary = STATE_FILE.with_name("%s.tmp.%s" % (STATE_FILE.name, os.getpid()))
+    with temporary.open("w") as handle:
+        handle.write(json.dumps(state, indent=2))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, STATE_FILE)
+
+def peer_names(asn, iface=None, proto=None):
+    """Resolve explicit, stored, legacy, or new names in that order."""
+    stored = load_state().get(str(asn), {})
+    if not iface:
+        iface = stored.get("iface")
+    if not iface:
+        legacy = Path(CONF["wg_dir"]) / ("%s.conf" % legacy_iface_name(asn))
+        iface = legacy_iface_name(asn) if legacy.exists() else iface_name(asn)
+
+    if not proto:
+        proto = stored.get("bgp_proto")
+    if not proto:
+        legacy = Path(CONF["bird_peer_dir"]) / ("%s.conf" % legacy_proto_name(asn))
+        proto = legacy_proto_name(asn) if legacy.exists() else proto_name(asn)
+    return validate_iface(iface), validate_proto(proto)
 
 def wg_private_key():
     if CONF["dry_run"]:
@@ -152,6 +185,7 @@ class Invalid(Exception):
 WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$")
 HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$", re.I)
 IFACE_RE = re.compile(r"^[A-Za-z0-9_.=-]{1,15}$")
+PROTO_RE = re.compile(r"^[A-Za-z0-9_.=-]{1,64}$")
 DN42_V4_NETS = [ipaddress.ip_network("10.0.0.0/8"), ipaddress.ip_network("172.20.0.0/14"), ipaddress.ip_network("172.31.0.0/16")]
 DN42_V6_NET = ipaddress.ip_network("fd00::/8")
 LL_NET = ipaddress.ip_network("fe80::/64")
@@ -238,6 +272,12 @@ def validate_iface(iface):
         raise Invalid("invalid interface name")
     return iface
 
+def validate_proto(proto):
+    proto = reject_controls("proto", proto)
+    if not PROTO_RE.match(proto) or "/" in proto or "\\" in proto or proto in (".", ".."):
+        raise Invalid("invalid BIRD protocol name")
+    return proto
+
 def safe_conf_path(base_dir, filename):
     base = Path(base_dir).resolve()
     path = (base / filename).resolve()
@@ -247,7 +287,9 @@ def safe_conf_path(base_dir, filename):
 
 def validate_spec(spec):
     spec["asn"] = validate_asn(spec.get("asn"))
-    spec["iface"] = validate_iface(iface_name(spec["asn"]))
+    spec["iface"] = validate_iface(spec.get("iface") or iface_name(spec["asn"]))
+    default_proto = legacy_proto_name(spec["asn"]) if spec["iface"] == legacy_iface_name(spec["asn"]) else proto_name(spec["asn"])
+    spec["bgp_proto"] = validate_proto(spec.get("bgp_proto") or default_proto)
     spec["wg_port"] = validate_port(spec.get("wg_port"))
     spec["peer_pubkey"] = validate_wg_key(spec.get("peer_pubkey"))
     spec["peer_endpoint"] = validate_endpoint(spec.get("peer_endpoint"))
@@ -276,26 +318,28 @@ def check_endpoint_resolves(endpoint):
     if res.returncode != 0 or not res.stdout.strip():
         raise Invalid("endpoint hostname %r does not resolve" % host)
 
-def check_conflicts(spec, wg_conf, bird_conf):
+def check_conflicts(spec, wg_conf, bird_conf, previous_wg=None, previous_bird=None):
+    previous_wg = set(previous_wg or ())
+    previous_bird = set(previous_bird or ())
     if wg_conf.exists() and not is_ours(wg_conf):
         raise Conflict("interface %s is manually managed on this node" % spec["iface"])
     if bird_conf.exists() and not is_ours(bird_conf):
-        raise Conflict("bird protocol %s is manually managed on this node" % proto_name(spec["asn"]))
+        raise Conflict("bird protocol %s is manually managed on this node" % spec["bgp_proto"])
     # a manually-managed file may declare the same protocol name under a different filename
     peer_dir = Path(CONF["bird_peer_dir"])
     if peer_dir.exists():
-        pat = re.compile(r"protocol\s+bgp\s+%s\b" % re.escape(proto_name(spec["asn"])))
+        pat = re.compile(r"protocol\s+bgp\s+%s\b" % re.escape(spec["bgp_proto"]))
         for f in peer_dir.glob("*"):
-            if f == bird_conf or not f.is_file():
+            if f == bird_conf or f.resolve() in previous_bird or not f.is_file():
                 continue
             try:
                 if pat.search(f.read_text()):
-                    raise Conflict("protocol %s already defined in %s" % (proto_name(spec["asn"]), f.name))
+                    raise Conflict("protocol %s already defined in %s" % (spec["bgp_proto"], f.name))
             except UnicodeDecodeError:
                 continue
     # WireGuard listen-port collision with any other config on the node
     for f in Path(CONF["wg_dir"]).glob("*.conf"):
-        if f == wg_conf:
+        if f == wg_conf or f.resolve() in previous_wg:
             continue
         try:
             m = re.search(r"^\s*ListenPort\s*=\s*(\d+)", f.read_text(), re.M)
@@ -326,7 +370,7 @@ def render_bird(spec):
     v4 = V4_CHANNEL.format(enh_line="        extended next hop on;\n") if spec.get("enh") else ""
     tpl = load_template(CONF["bird_template"], BIRD_TEMPLATE)
     return tpl.format(
-        proto=proto_name(spec["asn"]),
+        proto=spec["bgp_proto"],
         our_asn=CONF.get("our_asn", 4242420000),
         peer_ll=spec["peer_ll"],
         iface=spec["iface"],
@@ -344,90 +388,315 @@ def bird_reconfigure(check=True):
 
 def apply_peer(spec):
     spec = validate_spec(spec)
+    previous_iface, previous_proto = peer_names(spec["asn"])
     iface = spec["iface"]
     wg_conf = safe_conf_path(CONF["wg_dir"], "%s.conf" % iface)
-    bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % proto_name(spec["asn"]))
+    bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % spec["bgp_proto"])
+    previous_wg = safe_conf_path(CONF["wg_dir"], "%s.conf" % previous_iface)
+    previous_bird = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % previous_proto)
     wg_conf.parent.mkdir(parents=True, exist_ok=True)
     bird_conf.parent.mkdir(parents=True, exist_ok=True)
 
-    check_conflicts(spec, wg_conf, bird_conf)
+    check_conflicts(spec, wg_conf, bird_conf, {previous_wg}, {previous_bird})
+    for path, kind in ((previous_wg, "WireGuard"), (previous_bird, "BIRD")):
+        if path.exists() and not is_ours(path):
+            raise Conflict("refusing to migrate unmanaged %s config: %s" % (kind, path))
     check_endpoint_resolves(spec.get("peer_endpoint"))
 
     # both files (if present) are ours per check_conflicts — snapshot for rollback
-    old_wg = wg_conf.read_text() if wg_conf.exists() else None
-    old_bird = bird_conf.read_text() if bird_conf.exists() else None
-
-    if old_wg is not None:
-        run(["wg-quick", "down", str(wg_conf)], check=False)
-    wg_conf.write_text(render_wg(spec))
-    os.chmod(wg_conf, 0o600)
-    bird_conf.write_text(render_bird(spec))
+    paths = {previous_wg, previous_bird, wg_conf, bird_conf}
+    snapshots = {path: path.read_text() if path.exists() else None for path in paths}
     try:
+        if snapshots[previous_wg] is not None:
+            run(["wg-quick", "down", str(previous_wg)], check=False)
+        if wg_conf != previous_wg and snapshots[wg_conf] is not None:
+            run(["wg-quick", "down", str(wg_conf)], check=False)
+        for path in paths:
+            path.unlink(missing_ok=True)
+        wg_conf.write_text(render_wg(spec))
+        os.chmod(wg_conf, 0o600)
+        bird_conf.write_text(render_bird(spec))
         run(["wg-quick", "up", str(wg_conf)])
         bird_reconfigure()
+        state = load_state()
+        state[str(spec["asn"])] = {k: v for k, v in spec.items() if k != "private_key"}
+        save_state(state)
     except Exception:
         run(["wg-quick", "down", str(wg_conf)], check=False)
-        for path, old in ((wg_conf, old_wg), (bird_conf, old_bird)):
+        for path, old in snapshots.items():
             if old is None:
                 path.unlink(missing_ok=True)
             else:
                 path.write_text(old)
+                if path.parent == Path(CONF["wg_dir"]).resolve():
+                    os.chmod(path, 0o600)
+        if snapshots[previous_wg] is not None:
+            run(["wg-quick", "up", str(previous_wg)], check=False)
+        bird_reconfigure(check=False)
+        raise
+
+def remove_peer(asn):
+    iface, proto = peer_names(asn)
+    wg_conf = safe_conf_path(CONF["wg_dir"], "%s.conf" % iface)
+    bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % proto)
+    state = load_state()
+    old_wg = wg_conf.read_text() if wg_conf.exists() and is_ours(wg_conf) else None
+    old_bird = bird_conf.read_text() if bird_conf.exists() and is_ours(bird_conf) else None
+
+    # A name collision must never cause the agent to report success while
+    # leaving a manually-managed file behind.
+    if wg_conf.exists() and old_wg is None:
+        raise Conflict("refusing to remove unmanaged WireGuard config: %s" % wg_conf)
+    if bird_conf.exists() and old_bird is None:
+        raise Conflict("refusing to remove unmanaged BIRD config: %s" % bird_conf)
+
+    try:
+        if old_wg is not None:
+            run(["wg-quick", "down", str(wg_conf)], check=False)
+            wg_conf.unlink()
+        if old_bird is not None:
+            bird_conf.unlink()
+        bird_reconfigure()
+        state.pop(str(asn), None)
+        save_state(state)
+    except Exception:
+        if old_wg is not None:
+            wg_conf.write_text(old_wg)
+            os.chmod(wg_conf, 0o600)
+        if old_bird is not None:
+            bird_conf.write_text(old_bird)
         if old_wg is not None:
             run(["wg-quick", "up", str(wg_conf)], check=False)
         bird_reconfigure(check=False)
         raise
 
-    state = load_state()
-    state[str(spec["asn"])] = {k: v for k, v in spec.items() if k != "private_key"}
-    save_state(state)
+# --- discovery ------------------------------------------------------------------
 
-def remove_peer(asn):
-    iface = iface_name(asn)
-    wg_conf = Path(CONF["wg_dir"]) / ("%s.conf" % iface)
-    bird_conf = Path(CONF["bird_peer_dir"]) / ("%s.conf" % proto_name(asn))
-    if wg_conf.exists() and is_ours(wg_conf):
-        run(["wg-quick", "down", str(wg_conf)], check=False)
-        wg_conf.unlink()
-    if bird_conf.exists() and is_ours(bird_conf):
-        bird_conf.unlink()
-    bird_reconfigure(check=False)
-    state = load_state()
-    state.pop(str(asn), None)
-    save_state(state)
+def parse_wg_configs():
+    peers = {}
+    wg_dir = Path(CONF["wg_dir"])
+    if not wg_dir.exists():
+        return peers
+    for conf in wg_dir.glob("*.conf"):
+        try:
+            text = conf.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        iface = conf.stem
+        pub = re.search(r"^\s*PublicKey\s*=\s*(\S+)", text, re.M)
+        port = re.search(r"^\s*ListenPort\s*=\s*(\d+)", text, re.M)
+        endpoint = re.search(r"^\s*Endpoint\s*=\s*(\S+)", text, re.M)
+        peers[iface] = {
+            "iface": iface,
+            "peer_pubkey": pub.group(1) if pub else None,
+            "wg_port": int(port.group(1)) if port else 0,
+            "peer_endpoint": endpoint.group(1) if endpoint else None,
+            "managed": is_ours(conf),
+        }
+    return peers
+
+def parse_bird_peer_configs():
+    peers = []
+    peer_dir = Path(CONF["bird_peer_dir"])
+    if not peer_dir.exists():
+        return peers
+    for conf in peer_dir.glob("*"):
+        if not conf.is_file():
+            continue
+        try:
+            text = conf.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        proto = None
+        for line in text.splitlines():
+            m = re.match(r"\s*protocol\s+bgp\s+([A-Za-z0-9_.=-]+)\b", line)
+            if m:
+                proto = m.group(1)
+                continue
+            m = re.search(r"\bneighbor\s+([0-9A-Fa-f:.]+)(?:\s+%\s*['\"]?([A-Za-z0-9_.=-]+)['\"]?)?\s+as\s+(\d+)", line)
+            if not m or not proto:
+                continue
+            peers.append({
+                "asn": int(m.group(3)),
+                "bgp_proto": proto,
+                "peer_ll": m.group(1),
+                "iface": m.group(2) or None,
+                "managed": is_ours(conf),
+            })
+    return peers
+
+def discover_peers():
+    if CONF["dry_run"]:
+        discovered = []
+        for asn_s, spec in load_state().items():
+            spec = dict(spec)
+            spec["asn"] = int(asn_s)
+            spec["bgp_proto"] = spec.get("bgp_proto") or proto_name(spec["asn"])
+            spec["managed"] = True
+            spec["source"] = "auto"
+            discovered.append(spec)
+        return discovered
+
+    wg_by_iface = parse_wg_configs()
+    discovered = []
+    seen = set()
+    for bird in parse_bird_peer_configs():
+        iface = bird.get("iface") or iface_name(bird["asn"])
+        wg = wg_by_iface.get(iface, {})
+        peer = {
+            "asn": bird["asn"],
+            "iface": iface,
+            "bgp_proto": bird.get("bgp_proto"),
+            "wg_port": wg.get("wg_port", 0),
+            "peer_pubkey": wg.get("peer_pubkey"),
+            "peer_endpoint": wg.get("peer_endpoint"),
+            "peer_ll": bird.get("peer_ll"),
+            "peer_v4": None,
+            "peer_v6": None,
+            "mp_bgp": True,
+            "enh": True,
+            "managed": bool(bird.get("managed") or wg.get("managed")),
+            "source": "auto" if bool(bird.get("managed") or wg.get("managed")) else "manual",
+        }
+        discovered.append(peer)
+        seen.add(iface)
+
+    # Surface WireGuard-only configs as incomplete discoveries so the server
+    # can count them as skipped instead of making them invisible to operators.
+    for iface, wg in wg_by_iface.items():
+        if iface in seen:
+            continue
+        m = re.search(r"(\d{10}|\d{4})$", iface)
+        if not m:
+            continue
+        suffix = m.group(1)
+        asn = int(suffix) if len(suffix) == 10 else int("424242%s" % suffix)
+        discovered.append({
+            "asn": asn,
+            "iface": iface,
+            "bgp_proto": None,
+            "wg_port": wg.get("wg_port", 0),
+            "peer_pubkey": wg.get("peer_pubkey"),
+            "peer_endpoint": wg.get("peer_endpoint"),
+            "peer_ll": None,
+            "managed": bool(wg.get("managed")),
+            "source": "auto" if wg.get("managed") else "manual",
+        })
+    return discovered
 
 # --- status ---------------------------------------------------------------------
 
-def bgp_status(asn):
+def bgp_status(asn, proto=None):
     if CONF["dry_run"]:
-        return {"state": "Established", "since": "dry-run", "routes": {"ipv4_import": 0, "ipv4_export": 0, "ipv6_import": 0, "ipv6_export": 0}}
-    out = run(["birdc", "show", "protocols", "all", proto_name(asn)], check=False).stdout
-    state, since = "Unknown", ""
+        return {
+            "ok": True,
+            "state": "Established",
+            "protocol_state": "up",
+            "since": "dry-run",
+            "routes": {"ipv4_import": 0, "ipv4_export": 0, "ipv6_import": 0, "ipv6_export": 0},
+            "channels": {
+                "ipv4": {"state": "UP", "imported": 0, "exported": 0, "preferred": 0},
+                "ipv6": {"state": "UP", "imported": 0, "exported": 0, "preferred": 0},
+            },
+        }
+    name = peer_names(asn, proto=proto)[1]
+    res = run(["birdc", "show", "protocols", "all", name], check=False)
+    out = res.stdout
+    state, proto_state, since = "Unknown", "unknown", ""
+    neighbor_address, neighbor_as, local_as = None, None, None
+    error = None
+    if res.returncode != 0:
+        error = (res.stderr or res.stdout or "birdc failed").strip()[:300]
+    if re.search(r"\b(no such protocol|not found|unknown protocol)\b", out, re.I):
+        error = "BIRD protocol %s not found" % name
     for line in out.splitlines():
-        if line.startswith(proto_name(asn)):
+        if line.startswith(name):
             f = line.split()
             # name BGP table state since [info]; info = BGP FSM state (Established/Active/...)
             if len(f) >= 5:
+                proto_state = f[3]
                 since = f[4]
                 state = f[5] if len(f) >= 6 else f[3]
-            break
-    routes = {"ipv4_import": 0, "ipv4_export": 0, "ipv6_import": 0, "ipv6_export": 0}
-    for chan, imp, exp in re.findall(r"Channel (ipv[46]).*?Routes:\s+(\d+) imported.*?(\d+) exported", out, re.S):
-        routes["%s_import" % chan] = int(imp)
-        routes["%s_export" % chan] = int(exp)
-    return {"state": state, "since": since, "routes": routes}
+        m = re.match(r"\s*BGP state:\s+(\S+)", line)
+        if m:
+            state = m.group(1)
+        m = re.match(r"\s*Neighbor address:\s+(.+)", line)
+        if m:
+            neighbor_address = m.group(1).strip()
+        m = re.match(r"\s*Neighbor AS:\s+(\d+)", line)
+        if m:
+            neighbor_as = int(m.group(1))
+        m = re.match(r"\s*Local AS:\s+(\d+)", line)
+        if m:
+            local_as = int(m.group(1))
 
-def wg_status(asn):
-    if CONF["dry_run"]:
-        return {"latest_handshake_age": 0, "rx_bytes": 0, "tx_bytes": 0, "endpoint": None}
-    out = run(["wg", "show", iface_name(asn), "dump"], check=False).stdout.strip().splitlines()
-    if len(out) < 2:
-        return {"error": "interface not found"}
-    f = out[1].split("\t")  # pubkey psk endpoint allowed-ips handshake rx tx keepalive
-    import time
-    hs = int(f[4]) if len(f) > 4 and f[4].isdigit() else 0
+    routes = {"ipv4_import": 0, "ipv4_export": 0, "ipv6_import": 0, "ipv6_export": 0}
+    channels = {}
+    current_channel = None
+    for line in out.splitlines():
+        m = re.match(r"\s*Channel\s+(ipv[46])", line)
+        if m:
+            current_channel = m.group(1)
+            channels[current_channel] = {"state": "UNKNOWN", "imported": 0, "exported": 0, "preferred": 0}
+            continue
+        if not current_channel:
+            continue
+        m = re.match(r"\s*State:\s+(\S+)", line)
+        if m:
+            channels[current_channel]["state"] = m.group(1)
+            continue
+        m = re.match(r"\s*Routes:\s+(\d+) imported,\s+(\d+) exported(?:,\s+(\d+) preferred)?", line)
+        if m:
+            imported = int(m.group(1))
+            exported = int(m.group(2))
+            preferred = int(m.group(3) or 0)
+            channels[current_channel].update({"imported": imported, "exported": exported, "preferred": preferred})
+            routes["%s_import" % current_channel] = imported
+            routes["%s_export" % current_channel] = exported
+
     return {
+        "ok": state == "Established" and not error,
+        "state": state,
+        "protocol": name,
+        "protocol_state": proto_state,
+        "since": since,
+        "neighbor_address": neighbor_address,
+        "neighbor_as": neighbor_as,
+        "local_as": local_as,
+        "routes": routes,
+        "channels": channels,
+        "error": error,
+    }
+
+def wg_status(asn, iface=None):
+    if CONF["dry_run"]:
+        iface = peer_names(asn, iface=iface)[0]
+        return {
+            "ok": True,
+            "interface": iface,
+            "latest_handshake_at": int(time.time()),
+            "latest_handshake_age": 0,
+            "handshake_recent": True,
+            "rx_bytes": 0,
+            "tx_bytes": 0,
+            "endpoint": None,
+        }
+    iface = peer_names(asn, iface=iface)[0]
+    res = run(["wg", "show", iface, "dump"], check=False)
+    out = res.stdout.strip().splitlines()
+    if len(out) < 2:
+        err = (res.stderr or res.stdout or "interface not found").strip()[:300]
+        return {"ok": False, "interface": iface, "error": err, "handshake_recent": False}
+    f = out[1].split("\t")  # pubkey psk endpoint allowed-ips handshake rx tx keepalive
+    hs = int(f[4]) if len(f) > 4 and f[4].isdigit() else 0
+    age = int(time.time()) - hs if hs else None
+    return {
+        "ok": age is not None and age <= 180,
+        "interface": iface,
         "endpoint": f[2] if len(f) > 2 and f[2] != "(none)" else None,
-        "latest_handshake_age": int(time.time()) - hs if hs else None,
+        "latest_handshake_at": hs or None,
+        "latest_handshake_age": age,
+        "handshake_recent": age is not None and age <= 180,
         "rx_bytes": int(f[5]) if len(f) > 5 else 0,
         "tx_bytes": int(f[6]) if len(f) > 6 else 0,
     }
@@ -456,24 +725,35 @@ class Handler(BaseHTTPRequestHandler):
     def _route(self):
         if not self._authed():
             return self._send(401, {"error": "bad token"})
-        parts = [p for p in self.path.split("?")[0].split("/") if p]
+        url = urlsplit(self.path)
+        parts = [p for p in url.path.split("/") if p]
+        query = parse_qs(url.query)
         try:
             if self.command == "GET" and parts == ["health"]:
-                bird = run(["birdc", "show", "status"], check=False).stdout if not CONF["dry_run"] else "BIRD dry-run"
+                bird_res = run(["birdc", "show", "status"], check=False) if not CONF["dry_run"] else None
+                bird = bird_res.stdout if bird_res else "BIRD dry-run"
+                wg_ok = bool(shutil.which("wg")) or CONF["dry_run"]
+                wg_quick_ok = bool(shutil.which("wg-quick")) or CONF["dry_run"]
                 return self._send(200, {
-                    "ok": True,
+                    "ok": (bird_res.returncode == 0 if bird_res else True) and wg_ok and wg_quick_ok,
                     "hostname": os.uname().nodename if hasattr(os, "uname") else "unknown",
                     "bird": (re.search(r"BIRD [\d.]+", bird) or re.search(r".*", bird)).group(0)[:60],
-                    "wireguard": bool(shutil.which("wg")) or CONF["dry_run"],
+                    "bird_ok": bird_res.returncode == 0 if bird_res else True,
+                    "wireguard": wg_ok,
+                    "wg_quick": wg_quick_ok,
                     "dry_run": CONF["dry_run"],
                     "peers": len(load_state()),
                 })
             if self.command == "GET" and parts == ["peers"]:
                 return self._send(200, load_state())
+            if self.command == "GET" and parts == ["discover"]:
+                return self._send(200, {"peers": discover_peers()})
             if len(parts) >= 2 and parts[0] == "peers" and parts[1].isdigit():
                 asn = int(parts[1])
                 if self.command == "GET" and len(parts) == 3 and parts[2] == "status":
-                    return self._send(200, {"bgp": bgp_status(asn), "wireguard": wg_status(asn)})
+                    iface = query.get("iface", [None])[0]
+                    proto = query.get("proto", [None])[0]
+                    return self._send(200, {"bgp": bgp_status(asn, proto), "wireguard": wg_status(asn, iface)})
                 if self.command == "PUT" and len(parts) == 2:
                     length = int(self.headers.get("Content-Length", 0))
                     if length > 65536:
@@ -483,10 +763,12 @@ class Handler(BaseHTTPRequestHandler):
                     for field in ("wg_port", "peer_pubkey", "peer_ll", "our_ll"):
                         if not spec.get(field):
                             return self._send(400, {"error": "missing field: %s" % field})
-                    apply_peer(spec)
-                    return self._send(200, {"ok": True, "iface": spec["iface"], "proto": proto_name(asn)})
+                    with MUTATION_LOCK:
+                        apply_peer(spec)
+                    return self._send(200, {"ok": True, "iface": spec["iface"], "proto": spec["bgp_proto"]})
                 if self.command == "DELETE" and len(parts) == 2:
-                    remove_peer(asn)
+                    with MUTATION_LOCK:
+                        remove_peer(asn)
                     return self._send(200, {"ok": True})
             return self._send(404, {"error": "not found"})
         except Conflict as e:
