@@ -72,6 +72,13 @@ try { db.exec('ALTER TABLE peerings ADD COLUMN last_established_at TEXT'); } cat
 try { db.exec('ALTER TABLE peerings ADD COLUMN operational_error TEXT'); } catch { /* already there */ }
 try { db.exec('ALTER TABLE peerings ADD COLUMN last_checked_at TEXT'); } catch { /* already there */ }
 
+// Freeze the real legacy names before new sessions switch to full-ASN names.
+// Existing sessions stay online; only newly inserted rows use the new scheme.
+db.exec(`UPDATE peerings SET
+  iface = COALESCE(iface, 'dn42-' || substr(CAST(asn AS TEXT), -4)),
+  bgp_proto = COALESCE(bgp_proto, 'dn42_' || substr(CAST(asn AS TEXT), -4))
+  WHERE source = 'auto' AND (iface IS NULL OR bgp_proto IS NULL)`);
+
 export const q = {
   peeringsByAsn: db.prepare('SELECT * FROM peerings WHERE asn = ? ORDER BY created_at'),
   peeringById: db.prepare('SELECT * FROM peerings WHERE id = ?'),
@@ -81,8 +88,8 @@ export const q = {
   countByNode: db.prepare("SELECT node_id, COUNT(*) AS n FROM peerings WHERE status = 'active' GROUP BY node_id"),
   portsOnNode: db.prepare('SELECT wg_port FROM peerings WHERE node_id = ?'),
   insertPeering: db.prepare(`INSERT INTO peerings
-    (asn, mntner, node_id, status, wg_pubkey, wg_endpoint, peer_ll, peer_v4, peer_v6, mp_bgp, enh, wg_port)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    (asn, mntner, node_id, status, wg_pubkey, wg_endpoint, peer_ll, peer_v4, peer_v6, mp_bgp, enh, wg_port, iface, bgp_proto)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   updatePeering: db.prepare(`UPDATE peerings SET
     wg_pubkey = ?, wg_endpoint = ?, peer_ll = ?, peer_v4 = ?, peer_v6 = ?, mp_bgp = ?, enh = ?,
     updated_at = datetime('now') WHERE id = ?`),

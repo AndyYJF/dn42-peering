@@ -120,9 +120,15 @@ def run_always(cmd, timeout=10):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 def proto_name(asn):
-    return "dn42_%s" % str(asn)[-4:]
+    return "dn42_%s" % str(asn)
 
 def iface_name(asn):
+    return CONF["iface_prefix"] + str(asn)
+
+def legacy_proto_name(asn):
+    return "dn42_%s" % str(asn)[-4:]
+
+def legacy_iface_name(asn):
     return CONF["iface_prefix"] + str(asn)[-4:]
 
 def load_state():
@@ -133,6 +139,22 @@ def load_state():
 def save_state(state):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2))
+
+def peer_names(asn, iface=None, proto=None):
+    """Resolve explicit, stored, legacy, or new names in that order."""
+    stored = load_state().get(str(asn), {})
+    if not iface:
+        iface = stored.get("iface")
+    if not iface:
+        legacy = Path(CONF["wg_dir"]) / ("%s.conf" % legacy_iface_name(asn))
+        iface = legacy_iface_name(asn) if legacy.exists() else iface_name(asn)
+
+    if not proto:
+        proto = stored.get("bgp_proto")
+    if not proto:
+        legacy = Path(CONF["bird_peer_dir"]) / ("%s.conf" % legacy_proto_name(asn))
+        proto = legacy_proto_name(asn) if legacy.exists() else proto_name(asn)
+    return validate_iface(iface), validate_proto(proto)
 
 def wg_private_key():
     if CONF["dry_run"]:
@@ -257,7 +279,9 @@ def safe_conf_path(base_dir, filename):
 
 def validate_spec(spec):
     spec["asn"] = validate_asn(spec.get("asn"))
-    spec["iface"] = validate_iface(iface_name(spec["asn"]))
+    spec["iface"] = validate_iface(spec.get("iface") or iface_name(spec["asn"]))
+    default_proto = legacy_proto_name(spec["asn"]) if spec["iface"] == legacy_iface_name(spec["asn"]) else proto_name(spec["asn"])
+    spec["bgp_proto"] = validate_proto(spec.get("bgp_proto") or default_proto)
     spec["wg_port"] = validate_port(spec.get("wg_port"))
     spec["peer_pubkey"] = validate_wg_key(spec.get("peer_pubkey"))
     spec["peer_endpoint"] = validate_endpoint(spec.get("peer_endpoint"))
@@ -290,17 +314,17 @@ def check_conflicts(spec, wg_conf, bird_conf):
     if wg_conf.exists() and not is_ours(wg_conf):
         raise Conflict("interface %s is manually managed on this node" % spec["iface"])
     if bird_conf.exists() and not is_ours(bird_conf):
-        raise Conflict("bird protocol %s is manually managed on this node" % proto_name(spec["asn"]))
+        raise Conflict("bird protocol %s is manually managed on this node" % spec["bgp_proto"])
     # a manually-managed file may declare the same protocol name under a different filename
     peer_dir = Path(CONF["bird_peer_dir"])
     if peer_dir.exists():
-        pat = re.compile(r"protocol\s+bgp\s+%s\b" % re.escape(proto_name(spec["asn"])))
+        pat = re.compile(r"protocol\s+bgp\s+%s\b" % re.escape(spec["bgp_proto"]))
         for f in peer_dir.glob("*"):
             if f == bird_conf or not f.is_file():
                 continue
             try:
                 if pat.search(f.read_text()):
-                    raise Conflict("protocol %s already defined in %s" % (proto_name(spec["asn"]), f.name))
+                    raise Conflict("protocol %s already defined in %s" % (spec["bgp_proto"], f.name))
             except UnicodeDecodeError:
                 continue
     # WireGuard listen-port collision with any other config on the node
@@ -336,7 +360,7 @@ def render_bird(spec):
     v4 = V4_CHANNEL.format(enh_line="        extended next hop on;\n") if spec.get("enh") else ""
     tpl = load_template(CONF["bird_template"], BIRD_TEMPLATE)
     return tpl.format(
-        proto=proto_name(spec["asn"]),
+        proto=spec["bgp_proto"],
         our_asn=CONF.get("our_asn", 4242420000),
         peer_ll=spec["peer_ll"],
         iface=spec["iface"],
@@ -356,7 +380,7 @@ def apply_peer(spec):
     spec = validate_spec(spec)
     iface = spec["iface"]
     wg_conf = safe_conf_path(CONF["wg_dir"], "%s.conf" % iface)
-    bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % proto_name(spec["asn"]))
+    bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % spec["bgp_proto"])
     wg_conf.parent.mkdir(parents=True, exist_ok=True)
     bird_conf.parent.mkdir(parents=True, exist_ok=True)
 
@@ -392,9 +416,9 @@ def apply_peer(spec):
     save_state(state)
 
 def remove_peer(asn):
-    iface = iface_name(asn)
-    wg_conf = Path(CONF["wg_dir"]) / ("%s.conf" % iface)
-    bird_conf = Path(CONF["bird_peer_dir"]) / ("%s.conf" % proto_name(asn))
+    iface, proto = peer_names(asn)
+    wg_conf = safe_conf_path(CONF["wg_dir"], "%s.conf" % iface)
+    bird_conf = safe_conf_path(CONF["bird_peer_dir"], "%s.conf" % proto)
     state = load_state()
     old_wg = wg_conf.read_text() if wg_conf.exists() and is_ours(wg_conf) else None
     old_bird = bird_conf.read_text() if bird_conf.exists() and is_ours(bird_conf) else None
@@ -487,7 +511,7 @@ def discover_peers():
         for asn_s, spec in load_state().items():
             spec = dict(spec)
             spec["asn"] = int(asn_s)
-            spec["bgp_proto"] = proto_name(spec["asn"])
+            spec["bgp_proto"] = spec.get("bgp_proto") or proto_name(spec["asn"])
             spec["managed"] = True
             spec["source"] = "auto"
             discovered.append(spec)
@@ -522,11 +546,13 @@ def discover_peers():
     for iface, wg in wg_by_iface.items():
         if iface in seen:
             continue
-        m = re.search(r"(\d{4})$", iface)
+        m = re.search(r"(\d{10}|\d{4})$", iface)
         if not m:
             continue
+        suffix = m.group(1)
+        asn = int(suffix) if len(suffix) == 10 else int("424242%s" % suffix)
         discovered.append({
-            "asn": int("424242%s" % m.group(1)),
+            "asn": asn,
             "iface": iface,
             "bgp_proto": None,
             "wg_port": wg.get("wg_port", 0),
@@ -553,7 +579,7 @@ def bgp_status(asn, proto=None):
                 "ipv6": {"state": "UP", "imported": 0, "exported": 0, "preferred": 0},
             },
         }
-    name = validate_proto(proto) if proto else proto_name(asn)
+    name = peer_names(asn, proto=proto)[1]
     res = run(["birdc", "show", "protocols", "all", name], check=False)
     out = res.stdout
     state, proto_state, since = "Unknown", "unknown", ""
@@ -624,7 +650,7 @@ def bgp_status(asn, proto=None):
 
 def wg_status(asn, iface=None):
     if CONF["dry_run"]:
-        iface = validate_iface(iface) if iface else iface_name(asn)
+        iface = peer_names(asn, iface=iface)[0]
         return {
             "ok": True,
             "interface": iface,
@@ -635,7 +661,7 @@ def wg_status(asn, iface=None):
             "tx_bytes": 0,
             "endpoint": None,
         }
-    iface = validate_iface(iface) if iface else iface_name(asn)
+    iface = peer_names(asn, iface=iface)[0]
     res = run(["wg", "show", iface, "dump"], check=False)
     out = res.stdout.strip().splitlines()
     if len(out) < 2:
@@ -718,7 +744,7 @@ class Handler(BaseHTTPRequestHandler):
                         if not spec.get(field):
                             return self._send(400, {"error": "missing field: %s" % field})
                     apply_peer(spec)
-                    return self._send(200, {"ok": True, "iface": spec["iface"], "proto": proto_name(asn)})
+                    return self._send(200, {"ok": True, "iface": spec["iface"], "proto": spec["bgp_proto"]})
                 if self.command == "DELETE" and len(parts) == 2:
                     remove_peer(asn)
                     return self._send(200, {"ok": True})

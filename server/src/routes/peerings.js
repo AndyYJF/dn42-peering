@@ -3,7 +3,7 @@ import { config, nodeById, publicNode } from '../config.js';
 import { db, q, logEvent, recordOperationalState } from '../db.js';
 import { requireAuth } from './auth.js';
 import { deployPeer, peerStatus, safeRemove } from '../agents.js';
-import { isWgKey, isLinkLocal, isDn42V4, isDn42V6, isEndpoint, ifaceName, assignPort } from '../util.js';
+import { isWgKey, isLinkLocal, isDn42V4, isDn42V6, isEndpoint, ifaceName, protoName, assignPort } from '../util.js';
 import { operationalFailure, operationalSnapshot } from '../operational.js';
 import { deletePeeringTransaction } from '../lifecycle.js';
 
@@ -34,7 +34,7 @@ const toApi = (p) => ({
   operationalError: p.operational_error, lastCheckedAt: p.last_checked_at,
   wgPubkey: p.wg_pubkey, wgEndpoint: p.wg_endpoint, peerLl: p.peer_ll,
   peerV4: p.peer_v4, peerV6: p.peer_v6, mpBgp: !!p.mp_bgp, enh: !!p.enh,
-  wgPort: p.wg_port, source: p.source || 'auto', iface: p.iface || ifaceName(p.asn), bgpProto: p.bgp_proto || null,
+  wgPort: p.wg_port, source: p.source || 'auto', iface: p.iface || ifaceName(p.asn), bgpProto: p.bgp_proto || protoName(p.asn),
   lastError: p.last_error, createdAt: p.created_at, updatedAt: p.updated_at,
   ourSide: ourSide(p), node: nodeById(p.node_id) ? publicNode(nodeById(p.node_id)) : null,
 });
@@ -108,6 +108,7 @@ peeringsRouter.post('/', async (req, res) => {
     req.body.wgPubkey.trim(), req.body.wgEndpoint?.trim() || null,
     req.body.peerLl.trim(), req.body.peerV4?.trim() || null, req.body.peerV6?.trim() || null,
     req.body.mpBgp === false ? 0 : 1, req.body.enh === false ? 0 : 1, port,
+    ifaceName(asn), protoName(asn),
   );
   let peering = q.peeringById.get(info.lastInsertRowid);
   logEvent(asn, 'peering.create', `${node.id} port ${port}`);

@@ -75,5 +75,37 @@ class RemovePeerTests(unittest.TestCase):
         self.assertTrue(self.bird_conf.exists())
 
 
+class NamingTests(unittest.TestCase):
+    def test_full_asn_names_do_not_collide(self):
+        self.assertEqual(agent.iface_name(4242422921), "dn42-4242422921")
+        self.assertEqual(agent.iface_name(4201272921), "dn42-4201272921")
+        self.assertNotEqual(agent.iface_name(4242422921), agent.iface_name(4201272921))
+        self.assertEqual(len(agent.iface_name(4242422921)), 15)
+        self.assertEqual(agent.proto_name(4242422921), "dn42_4242422921")
+
+    def test_validate_spec_preserves_explicit_legacy_names(self):
+        spec = agent.validate_spec({
+            "asn": 4242421234,
+            "iface": "dn42-1234",
+            "wg_port": 21234,
+            "peer_pubkey": "A" * 43 + "=",
+            "peer_ll": "fe80::1234",
+            "our_ll": "fe80::1",
+        })
+        self.assertEqual(spec["iface"], "dn42-1234")
+        self.assertEqual(spec["bgp_proto"], "dn42_1234")
+
+    def test_validate_spec_defaults_new_sessions_to_full_names(self):
+        spec = agent.validate_spec({
+            "asn": 4201272921,
+            "wg_port": 22921,
+            "peer_pubkey": "A" * 43 + "=",
+            "peer_ll": "fe80::2921",
+            "our_ll": "fe80::1",
+        })
+        self.assertEqual(spec["iface"], "dn42-4201272921")
+        self.assertEqual(spec["bgp_proto"], "dn42_4201272921")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 import { config, nodeById } from './config.js';
-import { ifaceName } from './util.js';
+import { ifaceName, protoName } from './util.js';
 
 /**
  * Client for the per-node provisioning agents (agent/agent.py).
@@ -28,7 +28,8 @@ async function call(node, method, p, body) {
 export function peerPayload(node, p) {
   return {
     asn: p.asn,
-    iface: ifaceName(p.asn),
+    iface: p.iface || ifaceName(p.asn),
+    bgp_proto: p.bgp_proto || protoName(p.asn),
     wg_port: p.wg_port,
     peer_pubkey: p.wg_pubkey,
     peer_endpoint: p.wg_endpoint || null,
@@ -76,8 +77,8 @@ function demoCall(method, p) {
     const params = new URLSearchParams(query);
     const seed = asn % 97;
     const handshakeAge = 12 + (seed % 240);
-    const iface = params.get('iface') || `dn42-${String(asn).slice(-4)}`;
-    const proto = params.get('proto') || `dn42_${String(asn).slice(-4)}`;
+    const iface = params.get('iface') || ifaceName(asn);
+    const proto = params.get('proto') || protoName(asn);
     return {
       bgp: {
         ok: seed % 11 !== 0,
