@@ -26,6 +26,7 @@ repository-managed rollout.
 - `templates/`: BIRD OSPF/iBGP templates.
 - `render.py`: dependency-free validation and deterministic rendering.
 - `audit.py`: read-only SSH audit of OSPF Full/PtP and iBGP Established state.
+- `deploy.py` / `apply_core.py`: SSH-key staging plus locked, transactional node-side apply and rollback.
 - `.rendered/`: generated output; ignored by Git.
 
 ## Local workflow
@@ -52,10 +53,23 @@ python3 network/audit.py --identity deploy/.work/deploy_key
 python3 network/audit.py --node tyo --identity deploy/.work/deploy_key
 ```
 
+Render locally, run a remote parse/health check, then explicitly apply one node:
+
+```bash
+python3 network/deploy.py --node hkt --mode local
+python3 network/deploy.py --node hkt --mode remote-check --identity deploy/.work/deploy_key
+python3 network/deploy.py --node hkt --mode apply --confirm-node hkt --identity deploy/.work/deploy_key
+```
+
+`apply_core.py` refuses unexpected paths, takes a non-blocking deployment lock,
+requires a healthy pre-change core, parse-checks a temporary full BIRD tree,
+backs up only the managed files, and restores them if reconfigure or the
+300-second OSPF/iBGP recovery gate fails. It never writes `peers/`.
+
 ## Safe rollout sequence
 
-The generated files are not deployed automatically yet. The first rollout must
-be a canary and preserve the dynamic peer directory:
+Deployment is always explicit and node-scoped. The first rollout must be a
+canary and preserve the dynamic peer directory:
 
 1. Render and review the node diff.
 2. Capture `network/audit.py` as the pre-change baseline.
@@ -66,6 +80,3 @@ be a canary and preserve the dynamic peer directory:
 6. Require three Full/PtP neighbors in both OSPF families and three Established
    iBGP sessions. Restore the backup if the check fails.
 7. Roll out HKT first, then TYO, FRA, and LAX one at a time.
-
-The next phase adds the transactional deploy helper after the generated output
-has been compared with all four live nodes.
