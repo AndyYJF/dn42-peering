@@ -1,19 +1,18 @@
 .user-manage {
-  width: min(calc(100vw - 56px), 1720px);
-  margin-left: 50%;
-  transform: translateX(-50%);
+  width: 100%;
+  margin: 0 auto;
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
-  gap: 38px;
-  padding-top: 62px;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 28px;
+  padding-top: 36px;
 }
 
 .manage-sidebar {
   position: sticky;
-  top: 102px;
+  top: 80px;
   align-self: start;
-  min-height: calc(100vh - 150px);
-  padding-top: 72px;
+  min-height: calc(100vh - 180px);
+  padding-top: 16px;
   border-right: 1px solid var(--line-soft);
 }
 
@@ -21,9 +20,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  width: calc(100% - 28px);
+  width: calc(100% - 16px);
   margin-bottom: 8px;
-  padding: 13px 16px;
+  padding: 11px 14px;
   color: var(--mut);
   border: 1px solid transparent;
   border-radius: 6px;
