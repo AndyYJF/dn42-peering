@@ -250,17 +250,17 @@ function PeeringsTable({ token, onError }) {
                 : typeof wg?.latest_handshake_age === 'number' && wg.latest_handshake_age <= 180;
             return (
               <tr key={p.id}>
-                <td className="amber">AS{p.asn}</td>
-                <td className="mut">{p.mntner}</td>
-                <td>{p.nodeId}</td>
-                <td><span className={`chip ${p.source === 'manual' ? 'amber' : ''}`}>{p.source || 'auto'}</span></td>
-                <td className="mut">{p.wgPort}</td>
-                <td>
+                <td data-label="ASN" className="amber">AS{p.asn}</td>
+                <td data-label="Maintainer" className="mut">{p.mntner}</td>
+                <td data-label="Node">{p.nodeId}</td>
+                <td data-label="Source"><span className={`chip ${p.source === 'manual' ? 'amber' : ''}`}>{p.source || 'auto'}</span></td>
+                <td data-label="Port" className="mut">{p.wgPort}</td>
+                <td data-label="Status">
                   <StatusTag status={p.status} />
                   {p.status === 'active' && <LiveIssueTag live={live} />}
                   {p.lastError && <div className="xs red" title={p.lastError}>{p.lastError.slice(0, 48)}…</div>}
                 </td>
-                <td>
+                <td data-label="BGP">
                   {live?.bgp ? (
                     <>
                       <BgpStateTag state={live.bgp.state} />
@@ -268,7 +268,7 @@ function PeeringsTable({ token, onError }) {
                     </>
                   ) : <span className="dim xs">{live?.error || live?.reason || 'not probed'}</span>}
                 </td>
-                <td>
+                <td data-label="WireGuard">
                   {wg ? (
                     <span className={`tag ${wgOk ? 'grn' : 'amber'}`} title={wg.error || ''}>
                       <Led color={wgOk ? 'grn' : 'amber'} blink={!wgOk} />
@@ -276,19 +276,19 @@ function PeeringsTable({ token, onError }) {
                     </span>
                   ) : <span className="dim xs">{live?.error ? 'agent error' : 'not probed'}</span>}
                 </td>
-                <td className="xs">
+                <td data-label="Routes" className="xs">
                   {routes ? (
                     <span>{routes.ipv4_import}/{routes.ipv4_export} v4<br />{routes.ipv6_import}/{routes.ipv6_export} v6</span>
                   ) : <span className="dim">—</span>}
                 </td>
-                <td className="xs">
+                <td data-label="Transfer" className="xs">
                   {wg ? <span>rx {fmtBytes(wg.rx_bytes)}<br />tx {fmtBytes(wg.tx_bytes)}</span> : <span className="dim">—</span>}
                 </td>
-                <td className="mut xs">{p.wgEndpoint || '—'}</td>
-                <td className="dim xs">{p.createdAt?.slice(0, 16)}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>
+                <td data-label="Endpoint" className="mut xs">{p.wgEndpoint || '—'}</td>
+                <td data-label="Created" className="dim xs">{p.createdAt?.slice(0, 16)}</td>
+                <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
                   {busyId === p.id ? <Spinner /> : (
-                    <span style={{ display: 'inline-flex', gap: 6 }}>
+                    <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
                       {p.status === 'pending' && <button className="btn sm solid" onClick={() => act(p.id, 'approve')}>Approve</button>}
                       {p.source !== 'manual' && ['active', 'error', 'delete_failed'].includes(p.status) && <button className="btn sm" onClick={() => act(p.id, 'redeploy')}>Redeploy</button>}
                       {p.source !== 'manual' && p.status === 'active' && <button className="btn sm ghost" onClick={() => act(p.id, 'disable')}>Disable</button>}

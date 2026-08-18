@@ -40,10 +40,33 @@ function ThemeToggle() {
 }
 
 function TopBar({ info, auth, onLogout }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close mobile nav on escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Prevent background scroll when mobile menu is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.classList.add('menu-open');
+    } else {
+      document.body.classList.remove('menu-open');
+    }
+    return () => document.body.classList.remove('menu-open');
+  }, [menuOpen]);
+
+  const closeMenu = () => setMenuOpen(false);
+
   return (
     <header className="topbar">
       <div className="topbar-in">
-        <Link to="/" className="brand">
+        <Link to="/" className="brand" onClick={closeMenu}>
           <span className="brand-mark"><Led color="amber" /></span>
           <span>
             <span className="brand-name">PEERING<b>/</b>DESK</span>
@@ -51,13 +74,17 @@ function TopBar({ info, auth, onLogout }) {
             <span className="brand-asn">AS{info?.ourAsn || '——'} · {info?.networkName || 'DN42'}</span>
           </span>
         </Link>
-        <nav className="nav">
+
+        {/* Desktop navigation */}
+        <nav className="nav desktop-nav">
           <NavLink to="/" end>Network</NavLink>
           <NavLink to="/peer">Peer with us</NavLink>
           <NavLink to="/dashboard">My sessions</NavLink>
           <NavLink to="/admin">Admin</NavLink>
         </nav>
-        <div className="topbar-right">
+
+        {/* Desktop right controls */}
+        <div className="topbar-right desktop-right">
           <Clock />
           <ThemeToggle />
           {auth && (
@@ -67,6 +94,63 @@ function TopBar({ info, auth, onLogout }) {
               <button type="button" onClick={onLogout} title="log out">✕</button>
             </span>
           )}
+        </div>
+
+        {/* Mobile controls & hamburger button */}
+        <div className="mobile-controls">
+          <ThemeToggle />
+          <button
+            type="button"
+            className={`nav-toggle ${menuOpen ? 'active' : ''}`}
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+          >
+            <span className="nav-toggle-bar" />
+            <span className="nav-toggle-bar" />
+            <span className="nav-toggle-bar" />
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Drawer Overlay & Nav */}
+      <div className={`mobile-nav-backdrop ${menuOpen ? 'visible' : ''}`} onClick={closeMenu} />
+      <div className={`mobile-nav-drawer ${menuOpen ? 'open' : ''}`}>
+        <div className="mobile-nav-links">
+          <NavLink to="/" end onClick={closeMenu}>
+            <span className="mobile-nav-icon">◈</span> Network
+          </NavLink>
+          <NavLink to="/peer" onClick={closeMenu}>
+            <span className="mobile-nav-icon">⚡</span> Peer with us
+          </NavLink>
+          <NavLink to="/dashboard" onClick={closeMenu}>
+            <span className="mobile-nav-icon">◫</span> My sessions
+          </NavLink>
+          <NavLink to="/admin" onClick={closeMenu}>
+            <span className="mobile-nav-icon">⚙</span> Admin
+          </NavLink>
+        </div>
+
+        <div className="mobile-nav-footer">
+          <div className="mobile-nav-meta">
+            <Clock />
+            {auth && (
+              <span className="auth-chip">
+                <Led color="grn" />
+                AS{auth.asn}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLogout();
+                    closeMenu();
+                  }}
+                  title="log out"
+                >
+                  ✕
+                </button>
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </header>
