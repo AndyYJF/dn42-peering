@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically sync dn42 configs to dn42-config git repo
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -23,6 +23,7 @@ DN42 自助 peering 系统（全栈）。外部 AS 在网页上验证身份 → 
 | `agent/` | Python 3 纯标准库（单文件） | 跑在每个节点：渲染并应用 wg-quick + BIRD2 配置、回报 BGP/WG 状态 |
 | `config/` | JSON | 站点配置与 4 个节点定义 |
 | `network/` | 文档 | 指向独立的四节点 OSPF/iBGP 核心配置仓库 |
+| `sync/` | bash + systemd timer | 每 30 分钟把节点 wg/bird 配置推送到 dn42-config 备份仓库 |
 
 ## 网络核心配置
 
@@ -88,6 +89,24 @@ agent 前提：
   只应对 server 可达（走你的 mesh 内网或防火墙白名单），不要暴露公网。
 
 先用 `DRY_RUN=1 python3 agent.py` 验证：配置写入 `./dryrun/`，不碰系统。
+
+### 3. 配置备份同步（每个节点，可选）
+
+`sync/` 下的脚本把整个 `/etc/wireguard` 与 `/etc/bird` **原样**（含 WG 私钥明文）
+推送到私有仓库 [`AndyYJF/dn42-config`](https://github.com/AndyYJF/dn42-config) 的
+`<节点名>/wireguard|bird/` 目录，每 30 分钟一次，有变化才提交。
+
+```bash
+install -Dm755 sync/dn42-config-sync.sh /opt/dn42-peering/sync/dn42-config-sync.sh
+install -Dm644 sync/dn42-config-sync.env.example /etc/dn42-config-sync.env  # 改 NODE_NAME
+install -m644 sync/dn42-config-sync.{service,timer} /etc/systemd/system/
+ssh-keygen -t ed25519 -N '' -f /root/.ssh/dn42-config-sync
+# 公钥加到仓库 deploy keys（可写）：gh api repos/AndyYJF/dn42-config/keys -F key=@/root/.ssh/dn42-config-sync.pub -F title=<节点名>
+systemctl enable --now dn42-config-sync.timer
+```
+
+前提：节点装有 `git`；仓库必须是**私有**（备份含私钥）。手动跑一次：
+`systemctl start dn42-config-sync.service`，日志看 `journalctl -u dn42-config-sync.service`。
 
 ### 命名与端口约定
 

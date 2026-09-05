@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync dn42 WireGuard/BIRD configs to dn42-config git repo
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dn42-peering/sync/dn42-config-sync.sh
+Nice=10
+# 推送走 SSH，失败重试在脚本内部；超时兜底 5 分钟
+TimeoutStartSec=300
