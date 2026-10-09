@@ -665,7 +665,7 @@ body.menu-open {
 
 /* ---------- node cards ---------- */
 
-.node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 16px; }
+.node-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .node-card {
   padding: 0;
   position: relative;
