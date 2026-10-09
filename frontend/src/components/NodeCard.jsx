@@ -25,6 +25,7 @@ export function NodeCard({ node, selectable, selected, onSelect, footer }) {
         {node.manualApproval && <span className="chip">manual review</span>}
         {(node.features || []).map((f) => <span key={f} className="chip">{f}</span>)}
       </div>
+      {node.notice && <div className="node-notice">⚠ {node.notice}</div>}
       <div className="foot">
         <span className="dim">{node.activeSessions ?? 0} sessions</span>
         {footer}

@@ -381,6 +381,7 @@ function StepReview({ auth, node, form, onBack, onDone }) {
   };
   return (
     <div className="panel screws panel-body" style={{ maxWidth: 720 }}>
+      {node?.notice && <div className="node-notice big">⚠ {node.notice}</div>}
       <table className="kv">
         <tbody>
           <tr><td>Peer</td><td>AS{auth?.asn} ({auth?.mntner})</td></tr>

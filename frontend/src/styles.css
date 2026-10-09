@@ -309,6 +309,8 @@ h1, h2, h3 { margin: 0; font-weight: inherit; }
   margin-bottom: 7px;
 }
 .field-hint { color: var(--dim); letter-spacing: 0.05em; text-transform: none; }
+.node-notice { margin-top: 8px; padding: 6px 9px; border: 1px solid var(--amber); color: var(--amber); font-size: 11px; line-height: 1.5; }
+.node-notice.big { margin: 0 0 12px; padding: 10px 12px; font-size: 12px; }
 
 input[type='text'], textarea, select {
   width: 100%;

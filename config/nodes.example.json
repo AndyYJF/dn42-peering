@@ -64,6 +64,7 @@
       "agentUrl": "http://10.100.0.5:8643",
       "agentToken": "CHANGE-ME-sha1-agent-token",
       "manualApproval": true,
+      "notice": "仅限中国大陆 peer，国外 peer 申请一律拒绝；新 peer 均需人工审核。",
       "features": ["ipv4", "ipv6"]
     }
   ]
