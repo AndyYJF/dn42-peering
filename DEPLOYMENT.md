@@ -8,6 +8,7 @@
 | fra | 156.226.175.73 | 172.21.118.162 | agent |
 | lax | 45.202.243.95 | 172.21.118.165 | agent |
 | hkt | 154.37.219.205 | 172.21.118.164 | **server + 面板** + agent |
+| cn-shanghai | 180.153.83.98 | 172.21.118.163 | agent（**manualApproval**，新 peer 需 /admin 审核） |
 
 - 面板: **http://154.37.219.205:8042**(hkt 的 80/443 被 1Panel/openresty 占用;如需域名+HTTPS,在 1Panel 里加一个反代到 127.0.0.1:8042 的站点即可)
 - AS4242422921 / ANDY-MNT,身份验证方式:PGP(指纹 48B5…441F),登录时用 `gpg --clearsign` 签 challenge
