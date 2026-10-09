@@ -21,6 +21,7 @@ export function NodeCard({ node, selectable, selected, onSelect, footer }) {
         {node.tunnelV4 && <div className="row"><span className="k">DN42 v4</span><span className="v">{node.tunnelV4}</span></div>}
       </div>
       <div className="feats">
+        {node.coreOnly && <span className="chip">core-only</span>}
         {(node.features || []).map((f) => <span key={f} className="chip">{f}</span>)}
       </div>
       <div className="foot">

@@ -223,16 +223,19 @@ function StepNode({ nodes, existing, value, onChange, onNext, onBack }) {
       <div className="node-grid">
         {nodes.map((n) => {
           const has = taken.has(n.id);
+          const coreOnly = !!n.coreOnly;
           return (
             <NodeCard
               key={n.id}
               node={n}
-              selectable={!has}
+              selectable={!has && !coreOnly}
               selected={value === n.id}
               onSelect={() => onChange(n.id)}
-              footer={has
-                ? <span className="dim">already peered</span>
-                : <span className={value === n.id ? 'amber' : 'dim'}>{value === n.id ? 'selected ✓' : 'select'}</span>}
+              footer={coreOnly
+                ? <span className="dim">core-only · no peering</span>
+                : has
+                  ? <span className="dim">already peered</span>
+                  : <span className={value === n.id ? 'amber' : 'dim'}>{value === n.id ? 'selected ✓' : 'select'}</span>}
             />
           );
         })}

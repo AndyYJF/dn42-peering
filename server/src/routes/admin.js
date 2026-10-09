@@ -145,7 +145,7 @@ function validDiscoveredPeer(peer) {
 
 adminRouter.post('/peerings/sync-discovered', async (req, res) => {
   const nodeFilter = req.query.node || req.body?.nodeId;
-  const targetNodes = nodeFilter ? nodes.filter((n) => n.id === nodeFilter) : nodes;
+  const targetNodes = (nodeFilter ? nodes.filter((n) => n.id === nodeFilter) : nodes).filter((n) => !n.coreOnly);
   if (!targetNodes.length) return res.status(404).json({ error: 'node not found' });
   const results = [];
   for (const node of targetNodes) {
@@ -189,6 +189,7 @@ adminRouter.post('/peerings/sync-discovered', async (req, res) => {
 
 adminRouter.get('/nodes/health', async (req, res) => {
   const results = await Promise.all(nodes.map(async (n) => {
+    if (n.coreOnly) return { ...publicNode(n), reachable: true, health: 'core-only (no agent)' };
     try {
       return { ...publicNode(n), health: await agentHealth(n), reachable: true };
     } catch (e) {

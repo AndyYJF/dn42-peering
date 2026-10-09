@@ -94,6 +94,7 @@ peeringsRouter.post('/', async (req, res) => {
   if (asn === config.ourAsn) return res.status(400).json({ error: 'that is our own ASN' });
   const node = nodeById(String(req.body.nodeId || ''));
   if (!node) return res.status(400).json({ error: 'unknown node' });
+  if (node.coreOnly) return res.status(400).json({ error: `${node.id} is a core-only node and does not accept peerings` });
   if (q.peeringByAsnNode.get(asn, node.id)) return res.status(409).json({ error: `you already have a session on ${node.id}` });
   if (q.peeringsByAsn.all(asn).length >= config.maxPeeringsPerAsn) {
     return res.status(409).json({ error: `limit of ${config.maxPeeringsPerAsn} sessions per ASN reached` });

@@ -51,6 +51,17 @@
       "agentUrl": "http://10.100.0.4:8643",
       "agentToken": "CHANGE-ME-sin1-agent-token",
       "features": ["ipv4", "ipv6", "mp-bgp", "extended-next-hop"]
+    },
+    {
+      "id": "sha1",
+      "name": "Shanghai (core-only display)",
+      "cc": "CN",
+      "endpoint": "sha1.dn42.example.com",
+      "linkLocal": "fe80::1234:5",
+      "tunnelV4": "172.22.100.69",
+      "dn42V6": "fd42:4242:1234::5",
+      "coreOnly": true,
+      "features": ["ipv4", "ipv6"]
     }
   ]
 }

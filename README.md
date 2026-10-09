@@ -87,6 +87,9 @@ agent 前提：
   （如你的过滤器名不同，把模板写到文件并在 agent 配置里指定 `bird_template`）；
 - `nodes.json` 里该节点的 `agentUrl`/`agentToken` 与 agent 配置一致。agent 端口（默认 8643）
   只应对 server 可达（走你的 mesh 内网或防火墙白名单），不要暴露公网。
+- **core-only 节点**：节点条目加 `"coreOnly": true`（不写 `agentUrl`/`agentToken`）后，
+  节点会出现在面板和节点列表里，但自助 peer 向导不可选、POST /api/peerings 直接 400 拒绝、
+  admin 健康检查与 sync-discovered 跳过它。适合只入 core mesh、不接外部 peer 的节点。
 
 先用 `DRY_RUN=1 python3 agent.py` 验证：配置写入 `./dryrun/`，不碰系统。
 
