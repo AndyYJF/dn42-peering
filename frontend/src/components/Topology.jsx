@@ -31,8 +31,8 @@ export function Topology({ nodes = [], ourAsn }) {
         {ourAsn && <text x={cx} y={cy + 36} textAnchor="middle" fontSize="10" fill="#ffb000">AS{ourAsn}</text>}
       </g>
       {pos.map(({ node, x, y }) => (
-        <g key={node.id} className="topo-chip" transform={`translate(${x - 62}, ${y - 25})`}>
-          <rect width="124" height="50" rx="3" />
+        <g key={node.id} className="topo-chip" transform={`translate(${x - 74}, ${y - 25})`}>
+          <rect width="148" height="50" rx="3" />
           <circle cx="16" cy="25" r="4" fill="#3ddc84">
             <animate attributeName="opacity" values="1;0.5;1" dur="2.4s" repeatCount="indefinite" />
           </circle>
