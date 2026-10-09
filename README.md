@@ -90,6 +90,9 @@ agent 前提：
 - **core-only 节点**：节点条目加 `"coreOnly": true`（不写 `agentUrl`/`agentToken`）后，
   节点会出现在面板和节点列表里，但自助 peer 向导不可选、POST /api/peerings 直接 400 拒绝、
   admin 健康检查与 sync-discovered 跳过它。适合只入 core mesh、不接外部 peer 的节点。
+- **人工审核节点**：节点条目加 `"manualApproval": true` 后，即使全局 `autoApprove: true`，
+  该节点的新 peer 也进入 `pending`，需在 `/admin` 手动 Approve 才会下发。适合链路质量
+  需要把关的节点。
 
 先用 `DRY_RUN=1 python3 agent.py` 验证：配置写入 `./dryrun/`，不碰系统。
 

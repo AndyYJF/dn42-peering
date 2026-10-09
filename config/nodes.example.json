@@ -54,13 +54,16 @@
     },
     {
       "id": "sha1",
-      "name": "Shanghai (core-only display)",
+      "name": "Shanghai (manual approval)",
       "cc": "CN",
       "endpoint": "sha1.dn42.example.com",
+      "wgPubkey": "SHA1NODEPUBKEYxxxxxxxxxxxxxxxxxxxxxxxxxxxx=",
       "linkLocal": "fe80::1234:5",
       "tunnelV4": "172.22.100.69",
       "dn42V6": "fd42:4242:1234::5",
-      "coreOnly": true,
+      "agentUrl": "http://10.100.0.5:8643",
+      "agentToken": "CHANGE-ME-sha1-agent-token",
+      "manualApproval": true,
       "features": ["ipv4", "ipv6"]
     }
   ]

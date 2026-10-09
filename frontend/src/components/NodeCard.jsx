@@ -22,6 +22,7 @@ export function NodeCard({ node, selectable, selected, onSelect, footer }) {
       </div>
       <div className="feats">
         {node.coreOnly && <span className="chip">core-only</span>}
+        {node.manualApproval && <span className="chip">manual review</span>}
         {(node.features || []).map((f) => <span key={f} className="chip">{f}</span>)}
       </div>
       <div className="foot">

@@ -103,7 +103,7 @@ peeringsRouter.post('/', async (req, res) => {
   if (errors.length) return res.status(400).json({ error: errors.join('; ') });
 
   const port = assignPort(asn, q.portsOnNode.all(node.id).map((r) => r.wg_port));
-  const initial = config.autoApprove ? 'deploying' : 'pending';
+  const initial = (config.autoApprove && !node.manualApproval) ? 'deploying' : 'pending';
   const info = q.insertPeering.run(
     asn, req.auth.mntner, node.id, initial,
     req.body.wgPubkey.trim(), req.body.wgEndpoint?.trim() || null,
